@@ -92,6 +92,12 @@ curl http://127.0.0.1:10814/v1/models
 ```bash
 curl http://127.0.0.1:18081/healthz
 # 预期：ok
+
+路由指标：
+
+```bash
+curl http://127.0.0.1:18081/metrics
+```
 ```
 
 ### 4e. Gateway — 对外提供 OpenAI API
@@ -107,6 +113,44 @@ curl http://127.0.0.1:18081/healthz
 ```bash
 curl http://127.0.0.1:8081/healthz
 # 预期：ok
+
+网关指标：
+
+```bash
+curl http://127.0.0.1:8081/metrics
+```
+
+#### Control API 鉴权（可选）
+
+为 `/v1/admin/*` 开启鉴权时，设置以下环境变量：
+
+```bash
+# token:role 以逗号分隔，role 为 admin/operator/viewer
+export NEBULA_AUTH_TOKENS="devtoken:admin,viewtoken:viewer"
+
+# 可选：每分钟每 token 的请求上限
+export NEBULA_AUTH_RATE_LIMIT_PER_MINUTE=120
+```
+
+请求时携带 token：
+
+```bash
+curl -H "Authorization: Bearer devtoken" \
+  http://127.0.0.1:8081/v1/admin/cluster/status
+
+查看网关日志（tail 200 行）：
+
+```bash
+curl -H "Authorization: Bearer devtoken" \
+  "http://127.0.0.1:8081/v1/admin/logs?lines=200"
+```
+
+访问 Web Console（MVP）：
+
+```bash
+open http://127.0.0.1:8081/v1/admin/ui
+```
+```
 ```
 
 ## 5. 快速验证
@@ -196,3 +240,15 @@ Router 如果绑定端口失败会静默退出。启动时建议加 `RUST_BACKTR
 ```bash
 RUST_BACKTRACE=1 ./target/debug/nebula-router --listen 0.0.0.0:18081 --etcd-endpoints http://127.0.0.1:2379
 ```
+
+---
+
+## 8. Docker Compose（控制面）
+
+提供基础控制面编排（不含 GPU 的 nebula-node / vLLM）。
+
+```bash
+docker compose up -d --build
+```
+
+默认使用 `NEBULA_AUTH_TOKENS="devtoken:admin,viewtoken:viewer"`，可在 `docker-compose.yml` 中调整。

@@ -4,8 +4,10 @@ use std::time::Duration;
 
 use axum::{
     body::Body,
-    extract::{State},
+    extract::State,
     http::{HeaderMap, HeaderName, HeaderValue, Request, StatusCode},
+    middleware,
+    middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
@@ -40,10 +42,54 @@ struct AppState {
     router: Arc<nebula_router::Router>,
     http: reqwest::Client,
     plan_version: Arc<AtomicU64>,
+    metrics: Arc<Metrics>,
+}
+
+#[derive(Debug, Default)]
+struct Metrics {
+    requests_total: AtomicU64,
+    requests_inflight: AtomicU64,
+    status_2xx: AtomicU64,
+    status_4xx: AtomicU64,
+    status_5xx: AtomicU64,
 }
 
 async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, "ok")
+}
+
+async fn metrics_handler(State(st): State<AppState>) -> impl IntoResponse {
+    let body = format!(
+        "nebula_router_requests_total {}\nnebula_router_requests_inflight {}\nnebula_router_responses_2xx {}\nnebula_router_responses_4xx {}\nnebula_router_responses_5xx {}\n",
+        st.metrics.requests_total.load(Ordering::Relaxed),
+        st.metrics.requests_inflight.load(Ordering::Relaxed),
+        st.metrics.status_2xx.load(Ordering::Relaxed),
+        st.metrics.status_4xx.load(Ordering::Relaxed),
+        st.metrics.status_5xx.load(Ordering::Relaxed),
+    );
+    (StatusCode::OK, body)
+}
+
+async fn track_requests(
+    State(st): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response, std::convert::Infallible> {
+    st.metrics.requests_inflight.fetch_add(1, Ordering::Relaxed);
+    let resp = next.run(req).await;
+    st.metrics.requests_inflight.fetch_sub(1, Ordering::Relaxed);
+    st.metrics.requests_total.fetch_add(1, Ordering::Relaxed);
+
+    let status = resp.status().as_u16();
+    if status >= 500 {
+        st.metrics.status_5xx.fetch_add(1, Ordering::Relaxed);
+    } else if status >= 400 {
+        st.metrics.status_4xx.fetch_add(1, Ordering::Relaxed);
+    } else if status >= 200 {
+        st.metrics.status_2xx.fetch_add(1, Ordering::Relaxed);
+    }
+
+    Ok(resp)
 }
 
 fn build_execution_context(headers: &HeaderMap) -> ExecutionContext {
@@ -391,20 +437,26 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .expect("reqwest client");
 
+    let metrics = Arc::new(Metrics::default());
+
     let st = AppState {
         model_uid: args.model_uid,
         router,
         http,
         plan_version,
+        metrics,
     };
 
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/health", get(healthz))
+        .route("/metrics", get(metrics_handler))
         .route("/v1/chat/completions", post(proxy_chat_completions))
         .route("/v1/completions", post(proxy_chat_completions))
         .route("/v1/embeddings", post(proxy_chat_completions))
+        .route("/v1/rerank", post(proxy_chat_completions))
         .route("/v1/models", post(proxy_chat_completions).get(proxy_chat_completions))
+        .layer(middleware::from_fn_with_state(st.clone(), track_requests))
         .with_state(st);
 
     let listener = tokio::net::TcpListener::bind(&args.listen_addr).await?;

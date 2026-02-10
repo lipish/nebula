@@ -10,7 +10,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 use futures_util::StreamExt;
 use nebula_common::{
-    EndpointInfo, EndpointKind, EndpointStatus, NodeStatus, PlacementAssignment, PlacementPlan,
+    EndpointInfo, EndpointKind, EndpointStatus, GpuStatus, NodeStatus, PlacementAssignment,
+    PlacementPlan,
 };
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
@@ -76,10 +77,17 @@ async fn wait_engine_ready(base_url: &str, timeout: Duration) -> anyhow::Result<
         .build()?;
 
     let start = tokio::time::Instant::now();
+    let health_url = format!("{}/health", base_url.trim_end_matches('/'));
     let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
     loop {
         if start.elapsed() > timeout {
             anyhow::bail!("engine not ready within timeout");
+        }
+
+        if let Ok(resp) = http.get(&health_url).send().await {
+            if resp.status().is_success() {
+                return Ok("healthy".to_string());
+            }
         }
 
         match http.get(&url).send().await {
@@ -181,6 +189,9 @@ async fn start_vllm(
     info!("Using vllm binary: {}", args.vllm_bin);
     let mut cmd = Command::new(&args.vllm_bin);
     cmd.env("VLLM_USE_MODELSCOPE", "True");
+    if let Some(gpu_index) = assignment.gpu_index {
+        cmd.env("CUDA_VISIBLE_DEVICES", gpu_index.to_string());
+    }
     info!("Setting VLLM_USE_MODELSCOPE=True for vLLM process");
     cmd.current_dir(&args.vllm_cwd);
     cmd.arg("serve")
@@ -190,6 +201,12 @@ async fn start_vllm(
         .arg(&args.vllm_host)
         .arg("--port")
         .arg(assignment.port.to_string());
+
+    if let Some(extra) = assignment.extra_args.as_ref() {
+        for arg in extra {
+            cmd.arg(arg);
+        }
+    }
 
     if let Some(runner) = runner.as_deref() {
         cmd.arg("--runner").arg(runner);
@@ -234,6 +251,38 @@ async fn start_vllm(
     Ok((child, base_url, ready))
 }
 
+async fn read_gpu_statuses() -> Vec<GpuStatus> {
+    let output = Command::new("nvidia-smi")
+        .arg("--query-gpu=memory.total,memory.used")
+        .arg("--format=csv,noheader,nounits")
+        .output()
+        .await;
+
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut out = Vec::new();
+    for (idx, line) in stdout.lines().enumerate() {
+        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let total = parts[0].parse::<u64>().unwrap_or(0);
+        let used = parts[1].parse::<u64>().unwrap_or(0);
+        out.push(GpuStatus {
+            index: idx as u32,
+            memory_total_mb: total,
+            memory_used_mb: used,
+        });
+    }
+    out
+}
+
 async fn stop_child(child: &mut Child) {
     let _ = child.kill().await;
 }
@@ -265,9 +314,11 @@ async fn heartbeat_loop(
 ) {
     let key = format!("/nodes/{}/status", node_id);
     loop {
+        let gpus = read_gpu_statuses().await;
         let status = NodeStatus {
             node_id: node_id.clone(),
             last_heartbeat_ms: now_ms(),
+            gpus,
         };
 
         let bytes = match serde_json::to_vec(&status) {

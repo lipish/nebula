@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use nebula_common::{ClusterStatus, ModelLoadRequest, ModelRequest, EndpointStatus};
+use nebula_common::{ClusterStatus, ModelConfig, ModelLoadRequest, ModelRequest, EndpointStatus};
 use reqwest::Client;
 
 #[derive(Debug, Parser)]
@@ -10,6 +10,10 @@ struct Args {
     /// Gateway URL
     #[arg(long, env = "NEBULA_GATEWAY_URL", default_value = "http://127.0.0.1:8081")]
     gateway_url: String,
+
+    /// Gateway API token (Authorization: Bearer)
+    #[arg(long, env = "NEBULA_GATEWAY_TOKEN")]
+    token: Option<String>,
 
     #[command(subcommand)]
     command: Command,
@@ -26,6 +30,16 @@ enum Command {
     Model {
         #[command(subcommand)]
         subcommand: ModelCommand,
+    },
+    /// Show current auth identity
+    Whoami,
+    /// Fetch gateway metrics
+    Metrics,
+    /// Tail gateway logs
+    Logs {
+        /// Lines to return (default 200, max 2000)
+        #[arg(long)]
+        lines: Option<u32>,
     },
 }
 
@@ -50,6 +64,26 @@ enum ModelCommand {
         /// Number of replicas
         #[arg(long, default_value_t = 1)]
         replicas: u32,
+
+        /// Required VRAM in MB (capacity check)
+        #[arg(long)]
+        required_vram_mb: Option<u64>,
+
+        /// vLLM tensor parallel size
+        #[arg(long)]
+        tensor_parallel_size: Option<u32>,
+
+        /// vLLM GPU memory utilization (0-1)
+        #[arg(long)]
+        gpu_memory_utilization: Option<f32>,
+
+        /// vLLM max model length
+        #[arg(long)]
+        max_model_len: Option<u32>,
+
+        /// LoRA modules (repeatable)
+        #[arg(long, value_delimiter = ',')]
+        lora: Option<Vec<String>>,
     },
     /// Unload a model by request ID
     Unload {
@@ -62,30 +96,47 @@ enum ModelCommand {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let client = Client::new();
+    let token = args.token;
 
     match args.command {
         Command::Cluster { subcommand } => match subcommand {
             ClusterCommand::Status => {
                 let url = format!("{}/v1/admin/cluster/status", args.gateway_url.trim_end_matches('/'));
-                let status: ClusterStatus = client.get(&url).send().await?.json().await?;
+                let status: ClusterStatus = auth(client.get(&url), token.as_ref()).send().await?.json().await?;
                 print_cluster_status(status);
             }
         },
         Command::Model { subcommand } => match subcommand {
             ModelCommand::List => {
                 let url = format!("{}/v1/admin/models/requests", args.gateway_url.trim_end_matches('/'));
-                let requests: Vec<ModelRequest> = client.get(&url).send().await?.json().await?;
+                let requests: Vec<ModelRequest> = auth(client.get(&url), token.as_ref()).send().await?.json().await?;
                 print_model_requests(requests);
             }
-            ModelCommand::Load { name, uid, replicas } => {
+            ModelCommand::Load {
+                name,
+                uid,
+                replicas,
+                required_vram_mb,
+                tensor_parallel_size,
+                gpu_memory_utilization,
+                max_model_len,
+                lora,
+            } => {
                 let url = format!("{}/v1/admin/models/load", args.gateway_url.trim_end_matches('/'));
+                let config = build_config(
+                    tensor_parallel_size,
+                    gpu_memory_utilization,
+                    max_model_len,
+                    required_vram_mb,
+                    lora,
+                );
                 let req = ModelLoadRequest {
                     model_name: name.clone(),
                     model_uid: uid,
                     replicas,
-                    config: None,
+                    config,
                 };
-                let resp = client.post(&url).json(&req).send().await?;
+                let resp = auth(client.post(&url), token.as_ref()).json(&req).send().await?;
                 if resp.status().is_success() {
                     println!("✓ Model load request submitted for '{}'", name);
                     println!("{}", resp.text().await?);
@@ -95,7 +146,7 @@ async fn main() -> Result<()> {
             }
             ModelCommand::Unload { id } => {
                 let url = format!("{}/v1/admin/models/requests/{}", args.gateway_url.trim_end_matches('/'), id);
-                let resp = client.delete(&url).send().await?;
+                let resp = auth(client.delete(&url), token.as_ref()).send().await?;
                 if resp.status().is_success() {
                     println!("✓ Model unload request submitted for ID: {}", id);
                 } else {
@@ -103,9 +154,59 @@ async fn main() -> Result<()> {
                 }
             }
         },
+        Command::Whoami => {
+            let url = format!("{}/v1/admin/whoami", args.gateway_url.trim_end_matches('/'));
+            let resp = auth(client.get(&url), token.as_ref()).send().await?;
+            println!("{}", resp.text().await?);
+        }
+        Command::Metrics => {
+            let url = format!("{}/v1/admin/metrics", args.gateway_url.trim_end_matches('/'));
+            let resp = auth(client.get(&url), token.as_ref()).send().await?;
+            println!("{}", resp.text().await?);
+        }
+        Command::Logs { lines } => {
+            let mut url = format!("{}/v1/admin/logs", args.gateway_url.trim_end_matches('/'));
+            if let Some(n) = lines {
+                url = format!("{}?lines={}", url, n);
+            }
+            let resp = auth(client.get(&url), token.as_ref()).send().await?;
+            println!("{}", resp.text().await?);
+        }
     }
 
     Ok(())
+}
+
+fn auth(builder: reqwest::RequestBuilder, token: Option<&String>) -> reqwest::RequestBuilder {
+    match token {
+        Some(t) => builder.bearer_auth(t),
+        None => builder,
+    }
+}
+
+fn build_config(
+    tensor_parallel_size: Option<u32>,
+    gpu_memory_utilization: Option<f32>,
+    max_model_len: Option<u32>,
+    required_vram_mb: Option<u64>,
+    lora_modules: Option<Vec<String>>,
+) -> Option<ModelConfig> {
+    if tensor_parallel_size.is_none()
+        && gpu_memory_utilization.is_none()
+        && max_model_len.is_none()
+        && required_vram_mb.is_none()
+        && lora_modules.as_ref().map_or(true, |v| v.is_empty())
+    {
+        return None;
+    }
+
+    Some(ModelConfig {
+        tensor_parallel_size,
+        gpu_memory_utilization,
+        max_model_len,
+        required_vram_mb,
+        lora_modules,
+    })
 }
 
 fn print_cluster_status(status: ClusterStatus) {
