@@ -211,7 +211,13 @@ pub async fn proxy_post(
         return out;
     }
 
-    let bytes = resp.bytes().await.unwrap_or_default();
+    let bytes = match resp.bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::warn!(error=%e, "failed to read upstream response body");
+            Bytes::new()
+        }
+    };
     let mut out = Response::builder()
         .status(status)
         .body(Body::from(bytes))
