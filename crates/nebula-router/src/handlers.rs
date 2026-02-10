@@ -184,7 +184,7 @@ pub async fn proxy_chat_completions(
             .status(status)
             .header("content-type", "text/event-stream")
             .body(Body::from_stream(stream))
-            .unwrap();
+            .unwrap_or_else(|_| Response::new(Body::empty()));
         copy_response_headers(&resp_headers, &mut out);
         return out;
     }
@@ -197,7 +197,7 @@ pub async fn proxy_chat_completions(
     let mut out = Response::builder()
         .status(status)
         .body(Body::from(bytes))
-        .unwrap();
+        .unwrap_or_else(|_| Response::new(Body::empty()));
     copy_response_headers(&resp_headers, &mut out);
     out
 }
