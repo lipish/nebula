@@ -5,7 +5,7 @@ use futures_core::Stream;
 use futures_util::StreamExt;
 use serde_json::Value;
 use tokio::sync::mpsc;
-use tokio_stream::{iter, wrappers::ReceiverStream};
+use tokio_stream::wrappers::ReceiverStream;
 
 pub type EngineDeltaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
@@ -33,41 +33,6 @@ impl OpenAIEngineClient {
             model,
             http,
         }
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct StubEngineClient {}
-
-impl StubEngineClient {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    fn chunk_text(s: &str, chunk_size: usize) -> Vec<String> {
-        if s.is_empty() {
-            return vec![];
-        }
-        let mut out = Vec::new();
-        let mut buf = String::new();
-        for ch in s.chars() {
-            buf.push(ch);
-            if buf.chars().count() >= chunk_size {
-                out.push(std::mem::take(&mut buf));
-            }
-        }
-        if !buf.is_empty() {
-            out.push(buf);
-        }
-        out
-    }
-}
-
-impl EngineClient for StubEngineClient {
-    fn stream_text(&self, input: String) -> EngineDeltaStream {
-        let chunks = Self::chunk_text(&input, 16);
-        let s = iter(chunks).map(|s| s);
-        Box::pin(s)
     }
 }
 

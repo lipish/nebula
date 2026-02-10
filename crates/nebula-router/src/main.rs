@@ -30,8 +30,8 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    let store = nebula_meta::EtcdMetaStore::connect(std::slice::from_ref(&args.etcd_endpoint))
-        .await?;
+    let store =
+        nebula_meta::EtcdMetaStore::connect(std::slice::from_ref(&args.etcd_endpoint)).await?;
     let router = nebula_router::Router::new();
 
     let plan_version = Arc::new(AtomicU64::new(0));
