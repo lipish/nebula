@@ -31,7 +31,7 @@ struct ErrorResponse {
     error: ErrorDetail,
 }
 
-fn error_response(status: StatusCode, code: &str, message: &str) -> impl IntoResponse {
+fn error_response(status: StatusCode, code: &str, message: &str) -> Response {
     let body = ErrorResponse {
         error: ErrorDetail {
             code: code.to_string(),
@@ -40,7 +40,7 @@ fn error_response(status: StatusCode, code: &str, message: &str) -> impl IntoRes
             details: None,
         },
     };
-    (status, Json(body))
+    (status, Json(body)).into_response()
 }
 
 fn require_role(ctx: &AuthContext, required: Role) -> Option<Response> {
@@ -52,8 +52,7 @@ fn require_role(ctx: &AuthContext, required: Role) -> Option<Response> {
                 StatusCode::FORBIDDEN,
                 "forbidden",
                 "insufficient permissions",
-            )
-            .into_response(),
+            ),
         )
     } else {
         None
@@ -262,7 +261,7 @@ pub async fn logs(State(_st): State<AppState>) -> impl IntoResponse {
 async fn load_model_with_request(
     st: AppState,
     req: Option<ModelLoadRequest>,
-) -> impl IntoResponse {
+) -> Response {
     let req = match req {
         Some(req) => req,
         None => {
@@ -308,7 +307,7 @@ async fn load_model_with_request(
     (StatusCode::OK, Json(json!({"request_id": request_id, "status": "pending"}))).into_response()
 }
 
-async fn unload_model_inner(st: AppState, id: String) -> impl IntoResponse {
+async fn unload_model_inner(st: AppState, id: String) -> Response {
     if id.is_empty() {
         return error_response(
             StatusCode::BAD_REQUEST,

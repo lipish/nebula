@@ -91,6 +91,7 @@ pub async fn write_engine_env(path: &str, base_url: &str, model: &str) -> anyhow
 pub async fn start_vllm(
     args: &Args,
     assignment: &PlacementAssignment,
+    model_uid: &str,
 ) -> anyhow::Result<(Child, String, String)> {
     let cfg = parse_yaml_defaults(&assignment.engine_config_path).await;
     let model_tag = cfg
@@ -119,56 +120,103 @@ pub async fn start_vllm(
         "starting vllm engine"
     );
 
-    info!("Using vllm binary: {}", args.vllm_bin);
-    let mut cmd = Command::new(&args.vllm_bin);
-    cmd.env("VLLM_USE_MODELSCOPE", "True");
-    if let Some(gpu_index) = assignment.gpu_index {
-        cmd.env("CUDA_VISIBLE_DEVICES", gpu_index.to_string());
-    }
-    info!("Setting VLLM_USE_MODELSCOPE=True for vLLM process");
-    cmd.current_dir(&args.vllm_cwd);
-    cmd.arg("serve")
-        .arg("--config")
-        .arg(&assignment.engine_config_path)
-        .arg("--host")
-        .arg(&args.vllm_host)
-        .arg("--port")
-        .arg(assignment.port.to_string());
-
+    // Collect common vLLM args
+    let mut vllm_args: Vec<String> = Vec::new();
     if let Some(extra) = assignment.extra_args.as_ref() {
-        for arg in extra {
-            cmd.arg(arg);
-        }
+        vllm_args.extend(extra.clone());
     }
-
     if let Some(runner) = runner.as_deref() {
-        cmd.arg("--runner").arg(runner);
+        vllm_args.push("--runner".into());
+        vllm_args.push(runner.into());
     }
-
     if let Some(name) = served_model_name.as_deref() {
-        cmd.arg("--served-model-name").arg(name);
+        vllm_args.push("--served-model-name".into());
+        vllm_args.push(name.into());
     }
-
     if let Some(tp) = args.vllm_tensor_parallel_size {
-        cmd.arg("--tensor-parallel-size").arg(tp.to_string());
+        vllm_args.push("--tensor-parallel-size".into());
+        vllm_args.push(tp.to_string());
     }
     let gpu_memory_utilization = args
         .vllm_gpu_memory_utilization
         .or(cfg_gpu_memory_utilization);
     if let Some(v) = gpu_memory_utilization {
-        cmd.arg("--gpu-memory-utilization").arg(v.to_string());
+        vllm_args.push("--gpu-memory-utilization".into());
+        vllm_args.push(v.to_string());
     }
     if let Some(v) = args.vllm_max_model_len {
-        cmd.arg("--max-model-len").arg(v.to_string());
+        vllm_args.push("--max-model-len".into());
+        vllm_args.push(v.to_string());
     }
     if let Some(v) = args.vllm_max_num_batched_tokens {
-        cmd.arg("--max-num-batched-tokens").arg(v.to_string());
+        vllm_args.push("--max-num-batched-tokens".into());
+        vllm_args.push(v.to_string());
     }
     if let Some(v) = args.vllm_max_num_seqs {
-        cmd.arg("--max-num-seqs").arg(v.to_string());
+        vllm_args.push("--max-num-seqs".into());
+        vllm_args.push(v.to_string());
     }
     if let Some(v) = args.vllm_swap_space {
-        cmd.arg("--swap-space").arg(v.to_string());
+        vllm_args.push("--swap-space".into());
+        vllm_args.push(v.to_string());
+    }
+
+    let mut cmd;
+    if let Some(image) = args.vllm_docker_image.as_deref() {
+        // Docker mode
+        let container_name = format!("nebula-{}-{}", model_uid, assignment.replica_id);
+        // Stop & remove any previous container with the same name
+        let _ = Command::new("docker")
+            .args(["rm", "-f", &container_name])
+            .output()
+            .await;
+
+        let gpu_device = assignment
+            .gpu_index
+            .map(|i| format!("\"device={}\"", i))
+            .unwrap_or_else(|| "all".to_string());
+
+        // Remap model path: if model_tag starts with vllm_model_dir, replace with /model
+        let container_model = if model_tag.starts_with(&args.vllm_model_dir) {
+            model_tag.replacen(&args.vllm_model_dir, "/model", 1)
+        } else {
+            model_tag.clone()
+        };
+
+        info!(image=%image, container=%container_name, gpu=%gpu_device, model=%container_model, "launching vLLM via docker");
+
+        cmd = Command::new("docker");
+        cmd.arg("run")
+            .arg("--rm")
+            .arg("--name").arg(&container_name)
+            .arg("--gpus").arg(&gpu_device)
+            .arg("-p").arg(format!("{}:{}", assignment.port, assignment.port))
+            .arg("-v").arg(format!("{}:/model", args.vllm_model_dir))
+            .arg(image)
+            .arg("--model").arg(&container_model)
+            .arg("--host").arg("0.0.0.0")
+            .arg("--port").arg(assignment.port.to_string());
+
+        for a in &vllm_args {
+            cmd.arg(a);
+        }
+    } else {
+        // Local binary mode
+        info!("Using vllm binary: {}", args.vllm_bin);
+        cmd = Command::new(&args.vllm_bin);
+        cmd.env("VLLM_USE_MODELSCOPE", "True");
+        if let Some(gpu_index) = assignment.gpu_index {
+            cmd.env("CUDA_VISIBLE_DEVICES", gpu_index.to_string());
+        }
+        cmd.current_dir(&args.vllm_cwd);
+        cmd.arg("serve")
+            .arg(&model_tag)
+            .arg("--host").arg(&args.vllm_host)
+            .arg("--port").arg(assignment.port.to_string());
+
+        for a in &vllm_args {
+            cmd.arg(a);
+        }
     }
 
     let mut child = cmd.spawn()?;

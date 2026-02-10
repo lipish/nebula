@@ -947,6 +947,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nebula-bff"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "nebula-common",
+ "nebula-meta",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "nebula-cli"
 version = "0.1.0"
 dependencies = [

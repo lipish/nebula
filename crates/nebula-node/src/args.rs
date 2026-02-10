@@ -52,4 +52,12 @@ pub struct Args {
 
     #[arg(long)]
     pub vllm_tensor_parallel_size: Option<u32>,
+
+    /// If set, launch vLLM via `docker run` using this image instead of a local binary.
+    #[arg(long)]
+    pub vllm_docker_image: Option<String>,
+
+    /// Host path to mount as /model inside the container (e.g. /DATA/Model).
+    #[arg(long, default_value = "/DATA/Model")]
+    pub vllm_model_dir: String,
 }

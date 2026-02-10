@@ -37,10 +37,10 @@ pub fn parse_auth_from_env() -> AuthConfig {
     }
 }
 
-pub async fn auth_middleware<B>(
+pub async fn auth_middleware(
     State(st): State<AppState>,
-    mut req: Request<B>,
-    next: Next<B>,
+    mut req: Request<axum::body::Body>,
+    next: Next,
 ) -> impl IntoResponse {
     let auth_header = req
         .headers()

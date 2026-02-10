@@ -127,7 +127,7 @@ pub fn build_plan(
         assignments: vec![PlacementAssignment {
             replica_id: 0,
             node_id,
-            engine_config_path: format!("/home/lipeng/nebula/{}.yaml", req.request.model_uid),
+            engine_config_path: format!("/tmp/nebula/{}.yaml", req.request.model_uid),
             port,
             gpu_index,
             extra_args,

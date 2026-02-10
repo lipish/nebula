@@ -3,38 +3,61 @@
 
 @layer base {
   :root {
-    color: #121212;
-    background-color: #f6f2ea;
-    font-family: "IBM Plex Sans", ui-sans-serif, system-ui;
+    --background: 220 14% 93%;
+    --foreground: 220 20% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 10%;
+
+    --primary: 230 65% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 20% 10%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 10% 46%;
+
+    --accent: 220 14% 96%;
+    --accent-foreground: 220 20% 10%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 230 65% 55%;
+
+    --radius: 0.625rem;
+
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 210 20% 78%;
+    --sidebar-primary: 230 65% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 47% 16%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 222 30% 18%;
+
+    --success: 142 72% 42%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
   }
 
   body {
     min-height: 100vh;
-    background-image: radial-gradient(circle at 15% 10%, #fff9f1 0%, #f6f2ea 45%, #efe4d7 100%);
-    background-attachment: fixed;
-  }
-}
-
-@layer components {
-  .glass-panel {
-    border-radius: 1.5rem;
-    border: 1px solid #e3d8c7;
-    background: rgba(255, 255, 255, 0.7);
-    box-shadow: 0 18px 45px rgba(15, 24, 39, 0.12);
-    backdrop-filter: blur(12px);
-  }
-
-  .section-title {
-    font-family: "Space Grotesk", ui-sans-serif, system-ui;
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: #121212;
-  }
-
-  .data-label {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.2em;
-    color: #6f6a5e;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
