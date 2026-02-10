@@ -1,7 +1,5 @@
-use std::fs;
-
-pub fn read_engine_env_file(path: &str) -> Option<(String, String)> {
-    let content = fs::read_to_string(path).ok()?;
+pub async fn read_engine_env_file(path: &str) -> Option<(String, String)> {
+    let content = tokio::fs::read_to_string(path).await.ok()?;
     let mut base_url: Option<String> = None;
     let mut model: Option<String> = None;
     for line in content.lines() {

@@ -36,10 +36,13 @@ async fn main() {
     let router_base_url =
         env::var("NEBULA_ROUTER_URL").unwrap_or_else(|_| "http://127.0.0.1:18081".to_string());
 
-    let engine_model = env::var("NEBULA_ENGINE_MODEL")
-        .ok()
-        .or_else(|| read_engine_env_file("/tmp/nebula/engine.env").map(|(_url, model)| model))
-        .unwrap_or_else(|| "unknown".to_string());
+    let engine_model = match env::var("NEBULA_ENGINE_MODEL") {
+        Ok(model) => model,
+        Err(_) => read_engine_env_file("/tmp/nebula/engine.env")
+            .await
+            .map(|(_url, model)| model)
+            .unwrap_or_else(|| "unknown".to_string()),
+    };
 
     tracing::info!(router_base_url=%router_base_url, engine_model=%engine_model, "gateway starting");
 
