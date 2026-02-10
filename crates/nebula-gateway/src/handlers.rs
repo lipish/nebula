@@ -10,6 +10,7 @@ use axum::{
 };
 use bytes::Bytes;
 use serde_json::json;
+use tokio::fs;
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use uuid::Uuid;
@@ -356,7 +357,7 @@ pub async fn admin_logs(
     }
 
     let lines = query.lines.unwrap_or(200).min(2000);
-    let content = std::fs::read_to_string(&st.log_path).unwrap_or_default();
+    let content = fs::read_to_string(&st.log_path).await.unwrap_or_default();
     let mut out_lines: Vec<&str> = content.lines().collect();
     if out_lines.len() > lines {
         out_lines = out_lines[out_lines.len() - lines..].to_vec();
