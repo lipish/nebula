@@ -21,7 +21,16 @@ pub trait MetaStore: Send + Sync {
     async fn delete(&self, key: &str) -> Result<u64>;
     async fn list_prefix(&self, prefix: &str) -> Result<Vec<(String, Vec<u8>, u64)>>;
 
-    async fn compare_and_swap(&self, key: &str, expected_revision: u64, value: Vec<u8>) -> Result<(bool, u64)>;
+    async fn compare_and_swap(
+        &self,
+        key: &str,
+        expected_revision: u64,
+        value: Vec<u8>,
+    ) -> Result<(bool, u64)>;
 
-    async fn watch_prefix(&self, prefix: &str, start_revision_exclusive: Option<u64>) -> Result<WatchStream>;
+    async fn watch_prefix(
+        &self,
+        prefix: &str,
+        start_revision_exclusive: Option<u64>,
+    ) -> Result<WatchStream>;
 }

@@ -90,10 +90,7 @@ pub struct ResponseStreamBuilder {
 
 impl ResponseStreamBuilder {
     pub fn new(req: &CreateResponseRequest) -> Self {
-        let model = req
-            .model
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
+        let model = req.model.clone().unwrap_or_else(|| "unknown".to_string());
         let created = now_unix_seconds();
         let input_text = req.extract_input_text();
         let input_tokens = estimate_tokens(&input_text);
@@ -196,10 +193,7 @@ impl ResponseStreamBuilder {
 }
 
 pub fn build_response(req: &CreateResponseRequest, text: String) -> BuiltResponse {
-    let model = req
-        .model
-        .clone()
-        .unwrap_or_else(|| "unknown".to_string());
+    let model = req.model.clone().unwrap_or_else(|| "unknown".to_string());
 
     let created = now_unix_seconds();
 

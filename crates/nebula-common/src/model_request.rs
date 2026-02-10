@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 pub struct ModelLoadRequest {
     /// The user-facing model name (e.g., "Qwen/Qwen2.5-0.5B-Instruct")
     pub model_name: String,
-    
+
     /// The internal unique ID for the model (e.g., "qwen2_5_0_5b")
     pub model_uid: String,
-    
+
     /// Number of replicas desired (default: 1)
     #[serde(default = "default_replicas")]
     pub replicas: u32,

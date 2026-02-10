@@ -1,5 +1,5 @@
+use crate::{EndpointInfo, ModelRequest, NodeStatus, PlacementPlan};
 use serde::{Deserialize, Serialize};
-use crate::{EndpointInfo, NodeStatus, PlacementPlan, ModelRequest};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterStatus {
