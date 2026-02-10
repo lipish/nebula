@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "crates/nebula-common",
   "crates/nebula-meta",
+  "crates/nebula-bff",
   "crates/nebula-router",
   "crates/nebula-scheduler",
   "crates/nebula-gateway",

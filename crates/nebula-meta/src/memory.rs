@@ -50,11 +50,14 @@ impl MetaStore for MemoryMetaStore {
             let mut inner = self.inner.write().await;
             let rev = Self::next_revision(&mut inner);
             inner.kv.insert(key.to_string(), (value.clone(), rev));
-            (rev, WatchEvent {
-                key: key.to_string(),
-                value: Some(value),
-                revision: rev,
-            })
+            (
+                rev,
+                WatchEvent {
+                    key: key.to_string(),
+                    value: Some(value),
+                    revision: rev,
+                },
+            )
         };
         self.emit(event);
         Ok(rev)
@@ -88,13 +91,22 @@ impl MetaStore for MemoryMetaStore {
     async fn list_prefix(&self, prefix: &str) -> Result<Vec<(String, Vec<u8>, u64)>> {
         let inner = self.inner.read().await;
         let mut out = Vec::new();
-        for (k, (v, rev)) in inner.kv.range(prefix.to_string()..).take_while(|(k, _)| k.starts_with(prefix)) {
+        for (k, (v, rev)) in inner
+            .kv
+            .range(prefix.to_string()..)
+            .take_while(|(k, _)| k.starts_with(prefix))
+        {
             out.push((k.clone(), v.clone(), *rev));
         }
         Ok(out)
     }
 
-    async fn compare_and_swap(&self, key: &str, expected_revision: u64, value: Vec<u8>) -> Result<(bool, u64)> {
+    async fn compare_and_swap(
+        &self,
+        key: &str,
+        expected_revision: u64,
+        value: Vec<u8>,
+    ) -> Result<(bool, u64)> {
         let (ok, rev, event) = {
             let mut inner = self.inner.write().await;
             let current_rev = inner.kv.get(key).map(|(_, rev)| *rev).unwrap_or(0);
@@ -118,7 +130,11 @@ impl MetaStore for MemoryMetaStore {
         Ok((ok, rev))
     }
 
-    async fn watch_prefix(&self, prefix: &str, start_revision_exclusive: Option<u64>) -> Result<WatchStream> {
+    async fn watch_prefix(
+        &self,
+        prefix: &str,
+        start_revision_exclusive: Option<u64>,
+    ) -> Result<WatchStream> {
         let prefix = prefix.to_string();
         let min_rev = start_revision_exclusive.unwrap_or(0);
         let rx = self.tx.subscribe();

@@ -48,3 +48,10 @@
 - Week 3-4: drain/scale、健康信号完善，容量校验与端口分配器；Node 多 GPU 原型。
 - Week 5-6: 后台服务与 Web Console MVP；一键部署脚本；观测仪表盘。
 - Week 7+: LoRA 与高级 OpenAI 兼容特性，运维回滚/自愈完善。
+
+## 7. Week 1-2 具体任务拆解
+- **Control API 定义**：补全模型/端点/节点/审计对象的 protobuf + OpenAPI；统一错误码与幂等语义；补充拒绝/限流场景的返回格式。
+- **鉴权与 RBAC**：Gateway/Router 引入 API key/JWT 中间件；meta 存储/下发用户与角色映射；CLI 增加 `auth login`、`whoami`、`--token` 支持；提供示例策略（viewer/operator/admin）。
+- **可观测性基线**：各组件暴露指标（请求 QPS/latency、队列长度、调度结果、节点 GPU 内存/利用率）；统一 JSON 日志字段（trace_id/request_id/model/node/endpoint/version）；trace 通过 x-request-id 透传；提供 sample Grafana/Tempo/Loki 配置。
+- **CLI 能力**：实现 `metrics`（PromQL 直连或 proxy）、`tail-logs`（Loki/文件流式）、`chat`（走 Gateway）、`logs/metrics` 支持 --follow 与过滤；完善 `status/list` 输出（plan_version、健康信号）。
+- **测试与验收**：E2E 用例覆盖鉴权（通过/拒绝）、指标暴露、日志格式、CLI 新子命令；回归基础模型加载/推理；准备最小化 demo 配置用于演示。

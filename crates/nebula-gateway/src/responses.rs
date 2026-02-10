@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub struct CreateResponseRequest {
     pub model: Option<String>,
     pub input: Option<Value>,
+    #[allow(dead_code)]
     pub instructions: Option<Value>,
     pub stream: Option<bool>,
 }
@@ -43,15 +44,6 @@ impl CreateResponseRequest {
 
         "".to_string()
     }
-
-    pub fn clone_for_task(&self) -> Self {
-        Self {
-            model: self.model.clone(),
-            input: self.input.clone(),
-            instructions: self.instructions.clone(),
-            stream: self.stream,
-        }
-    }
 }
 
 fn now_unix_seconds() -> u64 {
@@ -78,7 +70,6 @@ pub struct BuiltResponse {
 }
 
 pub struct ResponseStreamBuilder {
-    req: CreateResponseRequest,
     response_id: String,
     message_id: String,
     created: u64,
@@ -90,16 +81,12 @@ pub struct ResponseStreamBuilder {
 
 impl ResponseStreamBuilder {
     pub fn new(req: &CreateResponseRequest) -> Self {
-        let model = req
-            .model
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
+        let model = req.model.clone().unwrap_or_else(|| "unknown".to_string());
         let created = now_unix_seconds();
         let input_text = req.extract_input_text();
         let input_tokens = estimate_tokens(&input_text);
 
         Self {
-            req: req.clone_for_task(),
             response_id: format!("resp_{}", Uuid::new_v4()),
             message_id: format!("msg_{}", Uuid::new_v4()),
             created,
@@ -174,32 +161,10 @@ impl ResponseStreamBuilder {
         self.seq += 1;
         ev
     }
-
-    pub fn into_built_response(self) -> BuiltResponse {
-        let full_text = self.deltas.join("");
-        let output_tokens = estimate_tokens(&full_text);
-        let usage = json!({
-            "input_tokens": self.input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": self.input_tokens + output_tokens
-        });
-
-        BuiltResponse {
-            response_id: self.response_id,
-            message_id: self.message_id,
-            created: self.created,
-            model: self.model,
-            text: full_text,
-            usage,
-        }
-    }
 }
 
 pub fn build_response(req: &CreateResponseRequest, text: String) -> BuiltResponse {
-    let model = req
-        .model
-        .clone()
-        .unwrap_or_else(|| "unknown".to_string());
+    let model = req.model.clone().unwrap_or_else(|| "unknown".to_string());
 
     let created = now_unix_seconds();
 

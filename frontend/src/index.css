@@ -1,0 +1,40 @@
+@import "tailwindcss";
+@reference "tailwindcss";
+
+@layer base {
+  :root {
+    color: #121212;
+    background-color: #f6f2ea;
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui;
+  }
+
+  body {
+    min-height: 100vh;
+    background-image: radial-gradient(circle at 15% 10%, #fff9f1 0%, #f6f2ea 45%, #efe4d7 100%);
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    border-radius: 1.5rem;
+    border: 1px solid #e3d8c7;
+    background: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 18px 45px rgba(15, 24, 39, 0.12);
+    backdrop-filter: blur(12px);
+  }
+
+  .section-title {
+    font-family: "Space Grotesk", ui-sans-serif, system-ui;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #121212;
+  }
+
+  .data-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: #6f6a5e;
+  }
+}

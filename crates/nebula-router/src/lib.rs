@@ -1,13 +1,7 @@
 use std::sync::Arc;
 
-use nebula_common::{EndpointInfo, EndpointStats, EndpointStatus, ExecutionContext};
 use dashmap::DashMap;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ReplicaKey<'a> {
-    model_uid: &'a str,
-    replica_id: u32,
-}
+use nebula_common::{EndpointInfo, EndpointStats, EndpointStatus, ExecutionContext};
 
 #[derive(Debug, Default)]
 pub struct Router {
