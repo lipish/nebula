@@ -21,7 +21,7 @@ use crate::auth::parse_auth_from_env;
 use crate::engine::{EngineClient, OpenAIEngineClient};
 use crate::handlers::{
     admin_cluster_status, admin_delete_request, admin_list_requests, admin_load_model, admin_logs,
-    admin_ui, admin_whoami, create_responses, healthz, list_models, not_implemented, proxy_post,
+    admin_whoami, create_responses, healthz, list_models, not_implemented, proxy_post,
 };
 use crate::metrics::{metrics_handler, track_requests};
 use crate::state::AppState;
@@ -111,7 +111,6 @@ async fn main() {
         .route("/v1/embeddings", post(proxy_post))
         .route("/v1/rerank", post(proxy_post))
         .route("/v1/models", get(list_models))
-        .route("/v1/admin/ui", get(admin_ui))
         .nest("/v1/admin", admin_routes)
         .layer(middleware::from_fn_with_state(st.clone(), track_requests))
         .with_state(st);
