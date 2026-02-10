@@ -55,13 +55,20 @@ async fn main() {
         .connect_timeout(Duration::from_secs(3))
         .timeout(Duration::from_secs(300))
         .build()
-        .expect("reqwest client");
+        .unwrap_or_else(|e| {
+            tracing::error!(error=%e, "failed to build reqwest client");
+            std::process::exit(1);
+        });
 
     let etcd_endpoint =
         env::var("ETCD_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:2379".to_string());
-    let store = nebula_meta::EtcdMetaStore::connect(&[etcd_endpoint])
-        .await
-        .expect("etcd connect");
+    let store = match nebula_meta::EtcdMetaStore::connect(&[etcd_endpoint]).await {
+        Ok(store) => store,
+        Err(e) => {
+            tracing::error!(error=%e, "failed to connect to etcd");
+            return;
+        }
+    };
 
     let auth = parse_auth_from_env();
 
@@ -117,7 +124,15 @@ async fn main() {
         }
     });
 
-    let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            tracing::error!(error=%e, addr=%addr, "failed to bind gateway address");
+            return;
+        }
+    };
 
-    axum::serve(listener, app).await.expect("serve");
+    if let Err(e) = axum::serve(listener, app).await {
+        tracing::error!(error=%e, "gateway server exited");
+    }
 }
