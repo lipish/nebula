@@ -65,7 +65,13 @@ impl EngineClient for OpenAIEngineClient {
 
             if !resp.status().is_success() {
                 let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
+                let text = match resp.text().await {
+                    Ok(text) => text,
+                    Err(e) => {
+                        tracing::warn!(error=%e, "failed to read engine error body");
+                        String::new()
+                    }
+                };
                 tracing::error!(%status, body=%text, "engine returned error");
                 return;
             }
