@@ -358,10 +358,8 @@ pub async fn admin_logs(
 
     let lines = query.lines.unwrap_or(200).min(2000);
     let content = fs::read_to_string(&st.log_path).await.unwrap_or_default();
-    let mut out_lines: Vec<&str> = content.lines().collect();
-    if out_lines.len() > lines {
-        out_lines = out_lines[out_lines.len() - lines..].to_vec();
-    }
+    let mut out_lines: Vec<&str> = content.lines().rev().take(lines).collect();
+    out_lines.reverse();
     (StatusCode::OK, out_lines.join("\n")).into_response()
 }
 
