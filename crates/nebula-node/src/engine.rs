@@ -51,9 +51,9 @@ async fn wait_engine_ready(base_url: &str, timeout: Duration) -> anyhow::Result<
     }
 }
 
-fn parse_yaml_defaults(path: &str) -> HashMap<String, String> {
+async fn parse_yaml_defaults(path: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
-    match std::fs::read_to_string(path) {
+    match fs::read_to_string(path).await {
         Ok(content) => {
             for line in content.lines() {
                 let line = line.trim();
@@ -92,7 +92,7 @@ pub async fn start_vllm(
     args: &Args,
     assignment: &PlacementAssignment,
 ) -> anyhow::Result<(Child, String, String)> {
-    let cfg = parse_yaml_defaults(&assignment.engine_config_path);
+    let cfg = parse_yaml_defaults(&assignment.engine_config_path).await;
     let model_tag = cfg
         .get("model")
         .cloned()
