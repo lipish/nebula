@@ -604,7 +604,16 @@ pub async fn admin_delete_request(
     };
 
     req.status = ModelRequestStatus::Unloading;
-    let val = serde_json::to_vec(&req).unwrap();
+    let val = match serde_json::to_vec(&req) {
+        Ok(val) => val,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("serialization error: {}", e),
+            )
+                .into_response();
+        }
+    };
     if let Err(e) = st.store.put(&key, val, None).await {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -640,7 +649,16 @@ pub async fn admin_load_model(
     };
 
     let key = format!("/model_requests/{}", model_req.id);
-    let val = serde_json::to_vec(&model_req).unwrap();
+    let val = match serde_json::to_vec(&model_req) {
+        Ok(val) => val,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("serialization error: {}", e),
+            )
+                .into_response();
+        }
+    };
 
     if let Err(e) = st.store.put(&key, val, None).await {
         return (
