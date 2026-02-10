@@ -1,0 +1,63 @@
+version: "3.9"
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.0
+    command: >-
+      /usr/local/bin/etcd
+      --advertise-client-urls http://0.0.0.0:2379
+      --listen-client-urls http://0.0.0.0:2379
+    ports:
+      - "2379:2379"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:2379/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gateway:
+    build:
+      context: .
+      dockerfile: crates/nebula-gateway/Dockerfile
+    environment:
+      ETCD_ENDPOINT: http://etcd:2379
+      NEBULA_ROUTER_URL: http://router:18081
+      NEBULA_GATEWAY_ADDR: 0.0.0.0:8081
+      NEBULA_AUTH_TOKENS: "devtoken:admin,viewtoken:viewer"
+    ports:
+      - "8081:8081"
+    depends_on:
+      etcd:
+        condition: service_healthy
+
+  router:
+    build:
+      context: .
+      dockerfile: crates/nebula-router/Dockerfile
+    environment:
+      RUST_LOG: info
+    command: >-
+      /app/nebula-router
+      --listen 0.0.0.0:18081
+      --etcd-endpoints http://etcd:2379
+    ports:
+      - "18081:18081"
+    depends_on:
+      etcd:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: crates/nebula-scheduler/Dockerfile
+    command: >-
+      /app/nebula-scheduler
+      --etcd-endpoint http://etcd:2379
+      --default-node-id node_gpu0
+      --default-port 10814
+    depends_on:
+      etcd:
+        condition: service_healthy
+
+# NOTE: nebula-node and vLLM are not included in compose because they require
+# GPU access and model files. Run them on GPU hosts directly.

@@ -7,7 +7,7 @@ pub mod cluster;
 
 pub use execution_context::ExecutionContext;
 pub use endpoint::{EndpointInfo, EndpointKind, EndpointStats, EndpointStatus};
-pub use node_status::NodeStatus;
+pub use node_status::{GpuStatus, NodeStatus};
 pub use placement::{PlacementAssignment, PlacementPlan};
 pub use model_request::*;
 pub use cluster::ClusterStatus;

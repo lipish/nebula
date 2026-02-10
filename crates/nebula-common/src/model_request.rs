@@ -26,6 +26,12 @@ pub struct ModelConfig {
     pub tensor_parallel_size: Option<u32>,
     pub gpu_memory_utilization: Option<f32>,
     pub max_model_len: Option<u32>,
+
+    #[serde(default)]
+    pub required_vram_mb: Option<u64>,
+
+    #[serde(default)]
+    pub lora_modules: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
