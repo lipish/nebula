@@ -4,8 +4,8 @@ use std::sync::Arc;
 use tokio::process::Child;
 use tokio::sync::Mutex;
 
-use nebula_common::{EndpointInfo, EndpointKind, EndpointStatus, PlacementPlan};
-use nebula_meta::EtcdMetaStore;
+use nebula_common::{EndpointInfo, EndpointKind, EndpointStatus, ModelRequest, ModelRequestStatus, PlacementPlan};
+use nebula_meta::{EtcdMetaStore, MetaStore};
 
 use crate::args::Args;
 use crate::engine::{start_vllm, write_engine_env};
@@ -17,6 +17,30 @@ pub struct RunningModel {
     pub replica_id: u32,
     pub plan_version: u64,
     pub child: Child,
+}
+
+async fn mark_request_failed(store: &EtcdMetaStore, request_id: &str, reason: String) {
+    let key = format!("/model_requests/{request_id}");
+    let loaded = store.get(&key).await;
+    let Ok(Some((bytes, _rev))) = loaded else {
+        tracing::warn!(%request_id, "failed to load model request for failure update");
+        return;
+    };
+    let mut req: ModelRequest = match serde_json::from_slice(&bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(%request_id, error=%e, "failed to deserialize model request for failure update");
+            return;
+        }
+    };
+    req.status = ModelRequestStatus::Failed(reason);
+    let Ok(val) = serde_json::to_vec(&req) else {
+        tracing::warn!(%request_id, "failed to serialize model request for failure update");
+        return;
+    };
+    if let Err(e) = store.put(&key, val, None).await {
+        tracing::warn!(%request_id, error=%e, "failed to persist model request failure update");
+    }
 }
 
 pub async fn reconcile_model(
@@ -68,7 +92,16 @@ pub async fn reconcile_model(
         endpoint_state.lock().await.remove(model_uid);
     }
 
-    let (child, base_url, engine_model) = start_vllm(args, assignment, model_uid, &plan.model_name).await?;
+    let (child, base_url, engine_model) = match start_vllm(args, assignment, model_uid, &plan.model_name).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(%model_uid, error=%e, "failed to start vllm engine");
+            if let Some(request_id) = plan.request_id.as_deref() {
+                mark_request_failed(store, request_id, e.to_string()).await;
+            }
+            return Ok(());
+        }
+    };
     write_engine_env(&args.engine_env_path, &base_url, &engine_model).await?;
 
     let info = EndpointInfo {

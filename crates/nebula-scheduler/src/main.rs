@@ -13,7 +13,7 @@ use nebula_common::{ModelRequest, ModelRequestStatus};
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
 use crate::args::Args;
-use crate::planner::{build_extra_args, build_plan, list_used_resources, select_node_and_gpu};
+use crate::planner::{build_extra_args, build_plan, list_used_resources, select_node_and_gpus};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -73,9 +73,9 @@ async fn main() -> Result<()> {
                     }
                 };
 
-                let (node_id, gpu_index) = select_node_and_gpu(&store, &req, &used_gpus)
+                let (node_id, gpu_indices) = select_node_and_gpus(&store, &req, &used_gpus)
                     .await
-                    .unwrap_or((args.default_node_id.clone(), None));
+                    .unwrap_or((args.default_node_id.clone(), vec![]));
 
                 let mut port = args.default_port;
                 while used_ports.contains(&port) {
@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
                 }
 
                 let extra_args = build_extra_args(&req);
-                let plan = build_plan(&req, node_id, port, gpu_index, extra_args);
+                let plan = build_plan(&req, node_id, port, gpu_indices, extra_args);
 
                 // 3. Write Placement
                 let placement_key = format!("/placements/{}", plan.model_uid);

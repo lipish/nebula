@@ -19,8 +19,12 @@ pub struct ModelLoadRequest {
     /// Optional target node for manual placement
     pub node_id: Option<String>,
 
-    /// Optional target GPU index for manual placement
+    /// Optional target GPU index for manual placement (legacy single-GPU)
     pub gpu_index: Option<u32>,
+
+    /// Optional target GPU indices for multi-GPU placement
+    #[serde(default)]
+    pub gpu_indices: Option<Vec<u32>>,
 }
 
 fn default_replicas() -> u32 {

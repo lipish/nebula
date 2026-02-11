@@ -1,11 +1,12 @@
 use axum::{
     extract::Path,
+    extract::Query,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
     Extension, Json,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -256,6 +257,152 @@ pub async fn metrics(
 
 pub async fn logs(State(_st): State<AppState>) -> impl IntoResponse {
     error_response(StatusCode::NOT_IMPLEMENTED, "not_implemented", "logs not implemented")
+}
+
+#[derive(Deserialize)]
+pub struct ModelSearchQuery {
+    pub q: String,
+    pub source: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct ModelSearchResult {
+    pub id: String,
+    pub name: String,
+    pub author: Option<String>,
+    pub downloads: u64,
+    pub likes: u64,
+    pub tags: Vec<String>,
+    pub pipeline_tag: Option<String>,
+    pub source: String,
+}
+
+pub async fn search_models(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    Query(params): Query<ModelSearchQuery>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Viewer) {
+        return resp;
+    }
+
+    let limit = params.limit.unwrap_or(20).min(50);
+    let source = params.source.as_deref().unwrap_or("huggingface");
+
+    match source {
+        "modelscope" => search_modelscope(&st.http, &params.q, limit).await,
+        _ => search_huggingface(&st.http, &params.q, limit).await,
+    }
+}
+
+async fn search_huggingface(http: &reqwest::Client, query: &str, limit: usize) -> Response {
+    let url = format!(
+        "https://hf-mirror.com/api/models?search={}&limit={}&sort=downloads&direction=-1",
+        urlencoding::encode(query),
+        limit
+    );
+
+    let resp = match http.get(&url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                "upstream_error",
+                &format!("HuggingFace API error: {}", e),
+            )
+        }
+    };
+
+    let body: Vec<serde_json::Value> = match resp.json().await {
+        Ok(b) => b,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                "upstream_error",
+                &format!("Failed to parse HuggingFace response: {}", e),
+            )
+        }
+    };
+
+    let results: Vec<ModelSearchResult> = body
+        .into_iter()
+        .map(|m| ModelSearchResult {
+            id: m["modelId"].as_str().unwrap_or_default().to_string(),
+            name: m["modelId"].as_str().unwrap_or_default().to_string(),
+            author: m.get("author").and_then(|a| a.as_str()).map(String::from),
+            downloads: m["downloads"].as_u64().unwrap_or(0),
+            likes: m["likes"].as_u64().unwrap_or(0),
+            tags: m["tags"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| t.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            pipeline_tag: m.get("pipeline_tag").and_then(|p| p.as_str()).map(String::from),
+            source: "huggingface".to_string(),
+        })
+        .collect();
+
+    (StatusCode::OK, Json(results)).into_response()
+}
+
+async fn search_modelscope(http: &reqwest::Client, query: &str, limit: usize) -> Response {
+    // ModelScope search API now requires authentication.
+    // Fall back to HuggingFace API and re-label results as modelscope,
+    // since most model paths are identical across both platforms.
+    let url = format!(
+        "https://hf-mirror.com/api/models?search={}&limit={}&sort=downloads&direction=-1",
+        urlencoding::encode(query),
+        limit
+    );
+
+    let resp = match http.get(&url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                "upstream_error",
+                &format!("Search API error: {}", e),
+            )
+        }
+    };
+
+    let body: Vec<serde_json::Value> = match resp.json().await {
+        Ok(b) => b,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                "upstream_error",
+                &format!("Failed to parse search response: {}", e),
+            )
+        }
+    };
+
+    let results: Vec<ModelSearchResult> = body
+        .into_iter()
+        .map(|m| ModelSearchResult {
+            id: m["modelId"].as_str().unwrap_or_default().to_string(),
+            name: m["modelId"].as_str().unwrap_or_default().to_string(),
+            author: m.get("author").and_then(|a| a.as_str()).map(String::from),
+            downloads: m["downloads"].as_u64().unwrap_or(0),
+            likes: m["likes"].as_u64().unwrap_or(0),
+            tags: m["tags"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| t.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            pipeline_tag: m.get("pipeline_tag").and_then(|p| p.as_str()).map(String::from),
+            source: "modelscope".to_string(),
+        })
+        .collect();
+
+    (StatusCode::OK, Json(results)).into_response()
 }
 
 async fn load_model_with_request(

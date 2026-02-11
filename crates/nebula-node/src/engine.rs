@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tokio::fs;
 use tokio::process::{Child, Command};
-use tracing::info;
+use tokio::net::TcpListener;
 
 use nebula_common::PlacementAssignment;
 
@@ -76,6 +76,26 @@ async fn parse_yaml_defaults(path: &str) -> HashMap<String, String> {
     out
 }
 
+async fn find_available_port(start_port: u16, max_tries: u16) -> anyhow::Result<u16> {
+    let mut port = start_port;
+    for _ in 0..max_tries {
+        match TcpListener::bind(("0.0.0.0", port)).await {
+            Ok(listener) => {
+                drop(listener);
+                return Ok(port);
+            }
+            Err(_) => {
+                port = port.saturating_add(1);
+            }
+        }
+    }
+    anyhow::bail!(
+        "no available port found in range [{}, {}]",
+        start_port,
+        start_port.saturating_add(max_tries)
+    );
+}
+
 pub async fn write_engine_env(path: &str, base_url: &str, model: &str) -> anyhow::Result<()> {
     if let Some(parent) = Path::new(path).parent() {
         fs::create_dir_all(parent).await?;
@@ -109,13 +129,21 @@ pub async fn start_vllm(
         .or_else(|| cfg.get("gpu_memory_utilization"))
         .and_then(|s| s.parse::<f32>().ok());
 
-    let base_url = format!("http://127.0.0.1:{}", assignment.port);
+    let selected_port = find_available_port(assignment.port, 64).await?;
+    if selected_port != assignment.port {
+        tracing::warn!(
+            requested_port = assignment.port,
+            selected_port,
+            "requested port is busy, using another port"
+        );
+    }
+    let base_url = format!("http://127.0.0.1:{}", selected_port);
     let timeout = Duration::from_secs(args.ready_timeout_secs);
 
     tracing::info!(
         node_id=%args.node_id,
         replica_id=assignment.replica_id,
-        port=assignment.port,
+        port=selected_port,
         config=%assignment.engine_config_path,
         model=%model_tag,
         "starting vllm engine"
@@ -134,7 +162,14 @@ pub async fn start_vllm(
         vllm_args.push("--served-model-name".into());
         vllm_args.push(name.into());
     }
-    if let Some(tp) = args.vllm_tensor_parallel_size {
+    // Determine tensor parallel size: from assignment gpu_indices, or from args
+    let effective_indices = assignment.effective_gpu_indices();
+    let tp_size = if let Some(ref indices) = effective_indices {
+        if indices.len() > 1 { Some(indices.len() as u32) } else { args.vllm_tensor_parallel_size }
+    } else {
+        args.vllm_tensor_parallel_size
+    };
+    if let Some(tp) = tp_size {
         vllm_args.push("--tensor-parallel-size".into());
         vllm_args.push(tp.to_string());
     }
@@ -143,10 +178,6 @@ pub async fn start_vllm(
         .or(cfg_gpu_memory_utilization);
     if let Some(v) = gpu_memory_utilization {
         vllm_args.push("--gpu-memory-utilization".into());
-        vllm_args.push(v.to_string());
-    }
-    if let Some(v) = args.vllm_max_model_len {
-        vllm_args.push("--max-model-len".into());
         vllm_args.push(v.to_string());
     }
     if let Some(v) = args.vllm_max_num_batched_tokens {
@@ -172,10 +203,12 @@ pub async fn start_vllm(
             .output()
             .await;
 
-        let gpu_device = assignment
-            .gpu_index
-            .map(|i| format!("\"device={}\"", i))
-            .unwrap_or_else(|| "all".to_string());
+        let gpu_device = if let Some(ref indices) = effective_indices {
+            let devs: Vec<String> = indices.iter().map(|i| i.to_string()).collect();
+            format!("\"device={}\"", devs.join(","))
+        } else {
+            "all".to_string()
+        };
 
         // Remap model path: if model_tag starts with vllm_model_dir, replace with /model
         let container_model = if model_tag.starts_with(&args.vllm_model_dir) {
@@ -184,36 +217,55 @@ pub async fn start_vllm(
             model_tag.clone()
         };
 
-        info!(image=%image, container=%container_name, gpu=%gpu_device, model=%container_model, "launching vLLM via docker");
+        tracing::info!(image=%image, container=%container_name, gpu=%gpu_device, model=%container_model, "launching vLLM via docker");
 
         cmd = Command::new("docker");
         cmd.arg("run")
             .arg("--rm")
             .arg("--name").arg(&container_name)
             .arg("--gpus").arg(&gpu_device)
-            .arg("-p").arg(format!("{}:{}", assignment.port, assignment.port))
-            .arg("-v").arg(format!("{}:/model", args.vllm_model_dir))
-            .arg(image)
-            .arg("--model").arg(&container_model)
+            .arg("-p").arg(format!("{}:{}", selected_port, selected_port))
+            .arg("-v").arg(format!("{}:/model", args.vllm_model_dir));
+
+        if args.vllm_use_modelscope {
+            cmd.arg("-e").arg("VLLM_USE_MODELSCOPE=True");
+        }
+        if let Some(ep) = args.vllm_hf_endpoint.as_deref() {
+            cmd.arg("-e").arg(format!("HF_ENDPOINT={ep}"));
+        }
+
+        cmd.arg("-e").arg("HF_HOME=/model/.cache/huggingface");
+        cmd.arg("-e").arg("TRANSFORMERS_CACHE=/model/.cache/huggingface");
+        cmd.arg("-e").arg("XDG_CACHE_HOME=/model/.cache");
+
+        cmd.arg(image);
+
+        cmd.arg("--model").arg(&container_model)
             .arg("--host").arg("0.0.0.0")
-            .arg("--port").arg(assignment.port.to_string());
+            .arg("--port").arg(selected_port.to_string());
 
         for a in &vllm_args {
             cmd.arg(a);
         }
     } else {
         // Local binary mode
-        info!("Using vllm binary: {}", args.vllm_bin);
+        tracing::info!("Using vllm binary: {}", args.vllm_bin);
         cmd = Command::new(&args.vllm_bin);
-        cmd.env("VLLM_USE_MODELSCOPE", "True");
-        if let Some(gpu_index) = assignment.gpu_index {
-            cmd.env("CUDA_VISIBLE_DEVICES", gpu_index.to_string());
+        if args.vllm_use_modelscope {
+            cmd.env("VLLM_USE_MODELSCOPE", "True");
+        }
+        if let Some(ep) = args.vllm_hf_endpoint.as_deref() {
+            cmd.env("HF_ENDPOINT", ep);
+        }
+        if let Some(ref indices) = effective_indices {
+            let devs: Vec<String> = indices.iter().map(|i| i.to_string()).collect();
+            cmd.env("CUDA_VISIBLE_DEVICES", devs.join(","));
         }
         cmd.current_dir(&args.vllm_cwd);
         cmd.arg("serve")
             .arg(&model_tag)
             .arg("--host").arg(&args.vllm_host)
-            .arg("--port").arg(assignment.port.to_string());
+            .arg("--port").arg(selected_port.to_string());
 
         for a in &vllm_args {
             cmd.arg(a);

@@ -43,6 +43,24 @@ export async function apiPost<T, Body>(
   return (await resp.json()) as T
 }
 
+export async function apiGetWithParams<T>(
+  path: string,
+  params: Record<string, string>,
+  token?: string
+): Promise<T> {
+  const query = new URLSearchParams(params).toString()
+  const resp = await fetch(`${BASE_URL}${path}?${query}`, {
+    headers: buildHeaders(token, false),
+  })
+
+  if (!resp.ok) {
+    const text = await resp.text()
+    throw new Error(text || `Request failed: ${resp.status}`)
+  }
+
+  return (await resp.json()) as T
+}
+
 export async function apiDelete<T>(path: string, token?: string): Promise<T> {
   const resp = await fetch(`${BASE_URL}${path}`, {
     method: 'DELETE',

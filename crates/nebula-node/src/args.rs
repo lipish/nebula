@@ -60,4 +60,13 @@ pub struct Args {
     /// Host path to mount as /model inside the container (e.g. /DATA/Model).
     #[arg(long, default_value = "/DATA/Model")]
     pub vllm_model_dir: String,
+
+    /// Use ModelScope as the model source for vLLM (sets VLLM_USE_MODELSCOPE=True).
+    /// Default: false (do not force ModelScope).
+    #[arg(long, default_value_t = false)]
+    pub vllm_use_modelscope: bool,
+
+    /// Optional HuggingFace endpoint mirror for downloading models (sets HF_ENDPOINT).
+    #[arg(long)]
+    pub vllm_hf_endpoint: Option<String>,
 }

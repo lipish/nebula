@@ -4,12 +4,15 @@ import type { ClusterStatus, ModelLoadRequest, ModelRequest } from '@/lib/types'
 
 // Components
 import Sidebar from '@/components/Sidebar'
+import { LoadModelDialog } from '@/components/LoadModelDialog'
 
 // Views
 import { DashboardView } from '@/components/views/dashboard'
 import { ModelsView } from '@/components/views/models'
 import { NodesView } from '@/components/views/nodes'
 import { SettingsView } from '@/components/views/settings'
+import { InferenceView } from '@/components/views/inference'
+import { EndpointsView } from '@/components/views/endpoints'
 
 const EMPTY_OVERVIEW: ClusterStatus = {
   nodes: [],
@@ -18,7 +21,7 @@ const EMPTY_OVERVIEW: ClusterStatus = {
   model_requests: [],
 }
 
-type Page = 'dashboard' | 'models' | 'nodes' | 'settings'
+type Page = 'dashboard' | 'models' | 'nodes' | 'settings' | 'inference' | 'endpoints'
 
 const statusVariant = (s: string): 'default' | 'outline' | 'secondary' | 'destructive' => {
   const n = s.toLowerCase()
@@ -40,14 +43,8 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState<Page>('dashboard')
-  const [showLoadForm, setShowLoadForm] = useState(false)
-  const [selectedGpu, setSelectedGpu] = useState<{ nodeId: string; gpuIndex: number } | null>(null)
-  const [form, setForm] = useState<ModelLoadRequest>({
-    model_name: '',
-    model_uid: '',
-    replicas: 1,
-    config: { max_model_len: 4096 },
-  })
+  const [showLoadDialog, setShowLoadDialog] = useState(false)
+  const [metricsRaw, setMetricsRaw] = useState('')
 
   const counts = useMemo(
     () => ({
@@ -69,6 +66,14 @@ function App() {
       ])
       setOverview(o)
       setRequests(r)
+      // Fetch gateway metrics (plain text, best-effort)
+      try {
+        const BASE_URL = import.meta.env.VITE_BFF_BASE_URL || '/api'
+        const mResp = await fetch(`${BASE_URL}/metrics`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+        if (mResp.ok) setMetricsRaw(await mResp.text())
+      } catch { /* metrics are optional */ }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data')
     } finally {
@@ -83,26 +88,21 @@ function App() {
     return () => clearInterval(id)
   }, [refreshAll])
 
-  const handleLoadModel = async () => {
+  const handleLoadModel = useCallback(async (form: ModelLoadRequest, gpu: { nodeId: string; gpuIndices: number[] }) => {
     setError(null)
-    if (!selectedGpu) {
-      setError('Please select a target GPU')
-      return
-    }
     try {
       await apiPost('/models/load', {
         ...form,
-        node_id: selectedGpu.nodeId,
-        gpu_index: selectedGpu.gpuIndex
+        node_id: gpu.nodeId,
+        gpu_index: gpu.gpuIndices[0] ?? undefined,
+        gpu_indices: gpu.gpuIndices,
       }, token)
-      setShowLoadForm(false)
-      setForm({ model_name: '', model_uid: '', replicas: 1, config: { max_model_len: 4096 } })
-      setSelectedGpu(null)
       await refreshAll()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load model')
+      throw err
     }
-  }
+  }, [token, refreshAll])
 
   const handleUnload = async (id: string) => {
     setError(null)
@@ -166,22 +166,24 @@ function App() {
           />
         )}
         {page === 'models' && (
-          <ModelsView
-            overview={overview}
-            requests={requests}
-            showLoadForm={showLoadForm}
-            setShowLoadForm={setShowLoadForm}
-            form={form}
-            setForm={setForm}
-            handleLoadModel={handleLoadModel}
-            handleUnload={handleUnload}
-            selectedGpu={selectedGpu}
-            setSelectedGpu={setSelectedGpu}
-            usedGpus={usedGpus}
-            statusVariant={statusVariant}
-            fmtTime={fmtTime}
-            pct={pct}
-          />
+          <>
+            <ModelsView
+              requests={requests}
+              endpoints={overview.endpoints}
+              onOpenLoadDialog={() => setShowLoadDialog(true)}
+              handleUnload={handleUnload}
+              fmtTime={fmtTime}
+            />
+            <LoadModelDialog
+              open={showLoadDialog}
+              onOpenChange={setShowLoadDialog}
+              overview={overview}
+              usedGpus={usedGpus}
+              pct={pct}
+              token={token}
+              onSubmit={handleLoadModel}
+            />
+          </>
         )}
         {page === 'nodes' && (
           <NodesView
@@ -200,6 +202,12 @@ function App() {
               refreshAll()
             }}
           />
+        )}
+        {page === 'inference' && (
+          <InferenceView overview={overview} metricsRaw={metricsRaw} />
+        )}
+        {page === 'endpoints' && (
+          <EndpointsView overview={overview} pct={pct} />
         )}
       </main>
     </div>

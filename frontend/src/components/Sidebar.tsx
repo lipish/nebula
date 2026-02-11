@@ -14,8 +14,8 @@ const menuItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: "Dashboard" },
     { id: 'models', icon: Box, label: "Models" },
     { id: 'nodes', icon: Server, label: "Nodes & GPUs" },
-    { icon: Activity, label: "Inference" },
-    { icon: Cpu, label: "Endpoints" },
+    { id: 'inference', icon: Activity, label: "Inference" },
+    { id: 'endpoints', icon: Cpu, label: "Endpoints" },
     { icon: MoreHorizontal, label: "More", hasArrow: true },
 ];
 

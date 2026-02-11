@@ -29,11 +29,14 @@ export interface PlacementAssignment {
   engine_config_path: string
   port: number
   gpu_index?: number | null
+  gpu_indices?: number[] | null
   extra_args?: string[] | null
 }
 
 export interface PlacementPlan {
+  request_id?: string | null
   model_uid: string
+  model_name?: string
   version: number
   assignments: PlacementAssignment[]
 }
@@ -51,13 +54,27 @@ export interface ModelLoadRequest {
   model_uid: string
   replicas?: number
   config?: ModelConfig | null
+  node_id?: string | null
+  gpu_index?: number | null
+  gpu_indices?: number[] | null
 }
 
 export interface ModelRequest {
   id: string
   request: ModelLoadRequest
-  status: string
+  status: unknown
   created_at_ms: number
+}
+
+export interface ModelSearchResult {
+  id: string
+  name: string
+  author: string | null
+  downloads: number
+  likes: number
+  tags: string[]
+  pipeline_tag: string | null
+  source: string
 }
 
 export interface ClusterStatus {

@@ -17,11 +17,11 @@ pub async fn list_used_resources(
             if let Ok(p) = serde_json::from_slice::<PlacementPlan>(&val) {
                 for a in p.assignments {
                     used_ports.insert(a.port);
-                    if let Some(gpu_index) = a.gpu_index {
-                        used_gpus
-                            .entry(a.node_id.clone())
-                            .or_default()
-                            .insert(gpu_index);
+                    if let Some(indices) = a.effective_gpu_indices() {
+                        let entry = used_gpus.entry(a.node_id.clone()).or_default();
+                        for idx in indices {
+                            entry.insert(idx);
+                        }
                     }
                 }
             }
@@ -30,11 +30,11 @@ pub async fn list_used_resources(
     Ok((used_ports, used_gpus))
 }
 
-pub async fn select_node_and_gpu(
+pub async fn select_node_and_gpus(
     store: &EtcdMetaStore,
     req: &ModelRequest,
     used_gpus: &HashMap<String, HashSet<u32>>,
-) -> anyhow::Result<(String, Option<u32>)> {
+) -> anyhow::Result<(String, Vec<u32>)> {
     let required_vram_mb = req
         .request
         .config
@@ -42,9 +42,23 @@ pub async fn select_node_and_gpu(
         .and_then(|c| c.required_vram_mb)
         .unwrap_or(0);
 
-    // Manual Override check
+    let tp_size = req
+        .request
+        .config
+        .as_ref()
+        .and_then(|c| c.tensor_parallel_size)
+        .unwrap_or(1)
+        .max(1) as usize;
+
+    // Manual Override: prefer gpu_indices, fall back to gpu_index
     if let Some(target_node) = &req.request.node_id {
-        return Ok((target_node.clone(), req.request.gpu_index));
+        let indices = req
+            .request
+            .gpu_indices
+            .clone()
+            .or_else(|| req.request.gpu_index.map(|i| vec![i]))
+            .unwrap_or_default();
+        return Ok((target_node.clone(), indices));
     }
 
     let mut nodes: Vec<NodeStatus> = Vec::new();
@@ -57,7 +71,9 @@ pub async fn select_node_and_gpu(
     }
 
     let now = now_ms();
-    let mut best: Option<(String, u32, u64)> = None;
+
+    // Try to find a node with `tp_size` free GPUs
+    let mut best_node: Option<(String, Vec<u32>, u64)> = None;
 
     for node in &nodes {
         if now.saturating_sub(node.last_heartbeat_ms) > NODE_STALE_MS {
@@ -65,36 +81,51 @@ pub async fn select_node_and_gpu(
         }
 
         let used = used_gpus.get(&node.node_id);
-        for gpu in node.gpus.iter() {
-            if let Some(used_set) = used {
-                if used_set.contains(&gpu.index) {
-                    continue;
+
+        // Collect available GPUs sorted by free memory (descending)
+        let mut available: Vec<(u32, u64)> = node
+            .gpus
+            .iter()
+            .filter(|gpu| {
+                if let Some(used_set) = used {
+                    if used_set.contains(&gpu.index) {
+                        return false;
+                    }
                 }
-            }
+                let free = gpu.memory_total_mb.saturating_sub(gpu.memory_used_mb);
+                free >= required_vram_mb
+            })
+            .map(|gpu| {
+                let free = gpu.memory_total_mb.saturating_sub(gpu.memory_used_mb);
+                (gpu.index, free)
+            })
+            .collect();
 
-            let free = gpu.memory_total_mb.saturating_sub(gpu.memory_used_mb);
-            if free < required_vram_mb {
-                continue;
-            }
+        available.sort_by(|a, b| b.1.cmp(&a.1));
 
-            match best {
-                Some((_, _, best_free)) if free <= best_free => {}
+        if available.len() >= tp_size {
+            let selected: Vec<u32> = available[..tp_size].iter().map(|(idx, _)| *idx).collect();
+            let total_free: u64 = available[..tp_size].iter().map(|(_, free)| free).sum();
+
+            match best_node {
+                Some((_, _, best_free)) if total_free <= best_free => {}
                 _ => {
-                    best = Some((node.node_id.clone(), gpu.index, free));
+                    best_node = Some((node.node_id.clone(), selected, total_free));
                 }
             }
         }
     }
 
-    if let Some((node_id, gpu_index, _)) = best {
-        return Ok((node_id, Some(gpu_index)));
+    if let Some((node_id, indices, _)) = best_node {
+        return Ok((node_id, indices));
     }
 
+    // Fallback: return any healthy node with no GPU selection
     for node in &nodes {
         if now.saturating_sub(node.last_heartbeat_ms) > NODE_STALE_MS {
             continue;
         }
-        return Ok((node.node_id.clone(), None));
+        return Ok((node.node_id.clone(), vec![]));
     }
 
     anyhow::bail!("no healthy nodes available")
@@ -104,6 +135,22 @@ pub fn build_extra_args(req: &ModelRequest) -> Option<Vec<String>> {
     let cfg = req.request.config.as_ref()?;
 
     let mut args = Vec::new();
+
+    if let Some(tp) = cfg.tensor_parallel_size {
+        args.push("--tensor-parallel-size".to_string());
+        args.push(tp.to_string());
+    }
+
+    if let Some(util) = cfg.gpu_memory_utilization {
+        args.push("--gpu-memory-utilization".to_string());
+        args.push(util.to_string());
+    }
+
+    if let Some(max_len) = cfg.max_model_len {
+        args.push("--max-model-len".to_string());
+        args.push(max_len.to_string());
+    }
+
     if let Some(mods) = cfg.lora_modules.as_ref() {
         if !mods.is_empty() {
             args.push("--enable-lora".to_string());
@@ -123,10 +170,22 @@ pub fn build_plan(
     req: &ModelRequest,
     node_id: String,
     port: u16,
-    gpu_index: Option<u32>,
+    gpu_indices: Vec<u32>,
     extra_args: Option<Vec<String>>,
 ) -> PlacementPlan {
+    let gpu_index = if gpu_indices.len() == 1 {
+        Some(gpu_indices[0])
+    } else {
+        gpu_indices.first().copied()
+    };
+    let gpu_indices_field = if gpu_indices.is_empty() {
+        None
+    } else {
+        Some(gpu_indices)
+    };
+
     PlacementPlan {
+        request_id: Some(req.id.clone()),
         model_uid: req.request.model_uid.clone(),
         model_name: req.request.model_name.clone(),
         version: now_ms(),
@@ -136,6 +195,7 @@ pub fn build_plan(
             engine_config_path: format!("/tmp/nebula/{}.yaml", req.request.model_uid),
             port,
             gpu_index,
+            gpu_indices: gpu_indices_field,
             extra_args,
         }],
     }
