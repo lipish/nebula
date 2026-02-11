@@ -15,6 +15,12 @@ pub struct ModelLoadRequest {
     /// Optional configuration overrides
     #[serde(default)]
     pub config: Option<ModelConfig>,
+
+    /// Optional target node for manual placement
+    pub node_id: Option<String>,
+
+    /// Optional target GPU index for manual placement
+    pub gpu_index: Option<u32>,
 }
 
 fn default_replicas() -> u32 {

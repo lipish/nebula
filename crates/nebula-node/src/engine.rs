@@ -92,12 +92,13 @@ pub async fn start_vllm(
     args: &Args,
     assignment: &PlacementAssignment,
     model_uid: &str,
+    model_name: &str,
 ) -> anyhow::Result<(Child, String, String)> {
     let cfg = parse_yaml_defaults(&assignment.engine_config_path).await;
     let model_tag = cfg
         .get("model")
         .cloned()
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_else(|| model_name.to_string());
     let runner = cfg.get("runner").cloned();
     let served_model_name = cfg
         .get("served-model-name")

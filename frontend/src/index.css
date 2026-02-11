@@ -1,9 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 @reference "tailwindcss";
 
 @layer base {
   :root {
-    --background: 220 14% 93%;
+    --background: 240 5% 96%;
     --foreground: 220 20% 10%;
 
     --card: 0 0% 100%;
@@ -12,51 +13,48 @@
     --popover: 0 0% 100%;
     --popover-foreground: 220 20% 10%;
 
-    --primary: 230 65% 55%;
+    --primary: 220 10% 12%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 14% 96%;
+    --secondary: 240 5% 96%;
     --secondary-foreground: 220 20% 10%;
 
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 10% 46%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 220 8% 55%;
 
-    --accent: 220 14% 96%;
+    --accent: 240 5% 93%;
     --accent-foreground: 220 20% 10%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 230 65% 55%;
-
-    --radius: 0.625rem;
-
-    --sidebar-background: 222 47% 11%;
-    --sidebar-foreground: 210 20% 78%;
-    --sidebar-primary: 230 65% 60%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 222 47% 16%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 222 30% 18%;
-
-    --success: 142 72% 42%;
+    --success: 152 60% 48%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
-  }
+    --border: 220 10% 91%;
+    --input: 220 10% 91%;
+    --ring: 220 10% 12%;
 
-  * {
-    border-color: hsl(var(--border));
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 220 8% 40%;
+    --sidebar-primary: 220 10% 12%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 96%;
+    --sidebar-accent-foreground: 220 10% 12%;
+    --sidebar-border: 220 10% 93%;
+    --sidebar-ring: 220 10% 12%;
+
+    --chart-1: 220 10% 12%;
+    --chart-2: 220 8% 75%;
   }
 
   body {
     min-height: 100vh;
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-family: 'DM Sans', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }

@@ -41,11 +41,9 @@ nohup ./target/release/nebula-scheduler \
     --default-node-id "$NODE_ID" > "$LOG_DIR/scheduler.log" 2>&1 &
 
 # 3. Start Gateway
-echo "Starting Nebula Gateway..."
-export RUST_LOG=info
-export NEBULA_GATEWAY_ADDR="0.0.0.0:$GATEWAY_PORT"
-export NEBULA_ROUTER_URL="http://127.0.0.1:$ROUTER_PORT"
-nohup ./target/release/nebula-gateway > "$LOG_DIR/gateway.log" 2>&1 &
+nohup ./target/release/nebula-gateway \
+    --listen-addr "0.0.0.0:$GATEWAY_PORT" \
+    --router-url "http://127.0.0.1:$ROUTER_PORT" > "$LOG_DIR/gateway.log" 2>&1 &
 
 # 4. Start Node (with ModelScope if needed)
 echo "Starting Nebula Node ($NODE_ID)..."
@@ -59,6 +57,7 @@ nohup ./target/release/nebula-node \
     --vllm-config "$NEBULA_ROOT/qwen.yaml" \
     --vllm-cwd "$NEBULA_ROOT" \
     --vllm-port "$NODE_PORT" \
+    --vllm-gpu-memory-utilization 0.4 \
     --ready-timeout-secs 1200 > "$LOG_DIR/node_$NODE_ID.log" 2>&1 &
 
 echo "All services started!"

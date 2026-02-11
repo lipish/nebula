@@ -42,6 +42,11 @@ pub async fn select_node_and_gpu(
         .and_then(|c| c.required_vram_mb)
         .unwrap_or(0);
 
+    // Manual Override check
+    if let Some(target_node) = &req.request.node_id {
+        return Ok((target_node.clone(), req.request.gpu_index));
+    }
+
     let mut nodes: Vec<NodeStatus> = Vec::new();
     if let Ok(kvs) = store.list_prefix("/nodes/").await {
         for (_, val, _) in kvs {
@@ -123,6 +128,7 @@ pub fn build_plan(
 ) -> PlacementPlan {
     PlacementPlan {
         model_uid: req.request.model_uid.clone(),
+        model_name: req.request.model_name.clone(),
         version: now_ms(),
         assignments: vec![PlacementAssignment {
             replica_id: 0,

@@ -17,6 +17,7 @@ pub struct PlacementAssignment {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlacementPlan {
     pub model_uid: String,
+    pub model_name: String,
     pub version: u64,
     pub assignments: Vec<PlacementAssignment>,
 }

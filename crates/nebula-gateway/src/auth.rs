@@ -114,6 +114,11 @@ pub async fn admin_auth(
     next: Next,
 ) -> Result<Response, std::convert::Infallible> {
     if !st.auth.enabled {
+        let ctx = AuthContext {
+            principal: "guest".to_string(),
+            role: Role::Admin,
+        };
+        req.extensions_mut().insert(ctx);
         return Ok(next.run(req).await);
     }
 

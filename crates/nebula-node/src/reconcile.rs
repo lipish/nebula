@@ -68,7 +68,7 @@ pub async fn reconcile_model(
         endpoint_state.lock().await.remove(model_uid);
     }
 
-    let (child, base_url, engine_model) = start_vllm(args, assignment, model_uid).await?;
+    let (child, base_url, engine_model) = start_vllm(args, assignment, model_uid, &plan.model_name).await?;
     write_engine_env(&args.engine_env_path, &base_url, &engine_model).await?;
 
     let info = EndpointInfo {

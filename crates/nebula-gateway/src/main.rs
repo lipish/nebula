@@ -1,3 +1,4 @@
+mod args;
 mod auth;
 mod engine;
 mod handlers;
@@ -6,7 +7,6 @@ mod responses;
 mod state;
 mod util;
 
-use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,8 +15,10 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
+use crate::args::Args;
 use crate::auth::parse_auth_from_env;
 use crate::engine::{EngineClient, OpenAIEngineClient};
 use crate::handlers::{
@@ -33,12 +35,12 @@ async fn main() {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let router_base_url =
-        env::var("NEBULA_ROUTER_URL").unwrap_or_else(|_| "http://127.0.0.1:18081".to_string());
+    let args = Args::parse();
+    let router_base_url = args.router_url;
 
-    let engine_model = match env::var("NEBULA_ENGINE_MODEL") {
-        Ok(model) => model,
-        Err(_) => read_engine_env_file("/tmp/nebula/engine.env")
+    let engine_model = match args.engine_model {
+        Some(model) => model,
+        None => read_engine_env_file("/tmp/nebula/engine.env")
             .await
             .map(|(_url, model)| model)
             .unwrap_or_else(|| "unknown".to_string()),
@@ -60,9 +62,7 @@ async fn main() {
             std::process::exit(1);
         });
 
-    let etcd_endpoint =
-        env::var("ETCD_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:2379".to_string());
-    let store = match nebula_meta::EtcdMetaStore::connect(&[etcd_endpoint]).await {
+    let store = match nebula_meta::EtcdMetaStore::connect(&[args.etcd_endpoint]).await {
         Ok(store) => store,
         Err(e) => {
             tracing::error!(error=%e, "failed to connect to etcd");
@@ -74,9 +74,6 @@ async fn main() {
 
     let metrics = Arc::new(metrics::Metrics::default());
 
-    let log_path = env::var("NEBULA_GATEWAY_LOG_PATH")
-        .unwrap_or_else(|_| "/tmp/nebula-gateway.log".to_string());
-
     let st = AppState {
         _noop: Arc::new(()),
         engine,
@@ -85,7 +82,7 @@ async fn main() {
         store: Arc::new(store),
         auth,
         metrics,
-        log_path,
+        log_path: args.log_path,
     };
 
     let admin_routes = Router::new()
@@ -99,7 +96,6 @@ async fn main() {
         .route("/whoami", get(admin_whoami))
         .route("/metrics", get(metrics::admin_metrics))
         .route("/logs", get(admin_logs))
-        .layer(middleware::from_fn_with_state(st.clone(), auth::admin_auth))
         .with_state(st.clone());
 
     let app = Router::new()
@@ -112,16 +108,12 @@ async fn main() {
         .route("/v1/rerank", post(proxy_post))
         .route("/v1/models", get(list_models))
         .nest("/v1/admin", admin_routes)
+        // Global middleware
+        .layer(middleware::from_fn_with_state(st.clone(), auth::admin_auth))
         .layer(middleware::from_fn_with_state(st.clone(), track_requests))
         .with_state(st);
 
-    let addr = env::var("NEBULA_GATEWAY_ADDR").unwrap_or_else(|_| {
-        if let Ok(port) = env::var("PORT") {
-            format!("0.0.0.0:{port}")
-        } else {
-            "0.0.0.0:8080".to_string()
-        }
-    });
+    let addr = args.listen_addr;
 
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => listener,
