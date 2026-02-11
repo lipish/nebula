@@ -1,198 +1,202 @@
-import { Activity, Cpu, Server, Sparkles, ChevronRight, Monitor } from "lucide-react"
+import { useMemo } from "react"
+import { Monitor, Search, Filter, MoreHorizontal } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
-import StatsCard from "@/components/StatsCard"
-import { LineChart, Line, ResponsiveContainer } from "recharts"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+    Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table"
+import {
+    BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Tooltip,
+} from "recharts"
 import type { ClusterStatus } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 interface DashboardProps {
     overview: ClusterStatus
     counts: { nodes: number; endpoints: number; requests: number }
     gpuStats: { total: number; used: number; count: number }
-    gpuModel: (nodeId: string, gpuIdx: number) => string | null
     pct: (used: number, total: number) => number
 }
 
-const sparkData = [
-    { v: 30 }, { v: 45 }, { v: 34 }, { v: 50 }, { v: 38 }, { v: 42 }, { v: 34 }, { v: 55 }, { v: 40 }, { v: 34 },
-];
+export function DashboardView({ overview, counts, gpuStats, pct }: DashboardProps) {
+    const gpuUsagePct = gpuStats.count > 0 ? pct(gpuStats.used, gpuStats.total) : 0
 
-export function DashboardView({ overview, counts, gpuStats, gpuModel, pct }: DashboardProps) {
-    const gpuUsagePct = gpuStats.count > 0 ? pct(gpuStats.used, gpuStats.total) : 0;
+    // Real GPU memory bar chart data
+    const gpuBarData = useMemo(() => {
+        const rows: { name: string; memUsed: number; memFree: number }[] = []
+        for (const node of overview.nodes) {
+            for (const gpu of node.gpus) {
+                rows.push({
+                    name: `${node.node_id} GPU ${gpu.index}`,
+                    memUsed: gpu.memory_used_mb,
+                    memFree: gpu.memory_total_mb - gpu.memory_used_mb,
+                })
+            }
+        }
+        return rows
+    }, [overview.nodes])
+
+    // Endpoint table rows from real data, gpu_index comes from placements
+    const endpointRows = useMemo(() => {
+        return overview.endpoints.map((ep) => {
+            // Find gpu_index from placements
+            let gpuIndex: number | null = null
+            for (const p of overview.placements) {
+                if (p.model_uid === ep.model_uid) {
+                    const a = p.assignments.find((a) => a.node_id === ep.node_id && a.replica_id === ep.replica_id)
+                    if (a?.gpu_index != null) gpuIndex = a.gpu_index
+                    break
+                }
+            }
+            const gpu = gpuIndex != null ? `GPU ${gpuIndex}` : "CPU"
+            // Find memory usage for this GPU
+            let memUsed = ""
+            for (const node of overview.nodes) {
+                if (node.node_id === ep.node_id) {
+                    const g = gpuIndex != null ? node.gpus.find((g) => g.index === gpuIndex) : null
+                    if (g) memUsed = `${g.memory_used_mb.toLocaleString()} MB`
+                    break
+                }
+            }
+            return {
+                model: ep.model_uid,
+                node: ep.node_id,
+                gpu,
+                memUsed: memUsed || "—",
+                status: ep.status?.toLowerCase().includes("ready") || ep.status?.toLowerCase().includes("run") ? "ready" as const : "loading" as const,
+            }
+        })
+    }, [overview.endpoints, overview.nodes, overview.placements])
 
     return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {/* Welcome Header */}
+        <div className="space-y-5">
+            {/* Header */}
             <div>
-                <h2 className="text-2xl font-bold text-foreground">Overview</h2>
-                <div className="mt-4">
-                    <h3 className="text-xl font-bold text-foreground">Welcome back, Admin</h3>
+                <h2 className="text-2xl font-bold text-foreground mb-1">Overview</h2>
+                <div className="mt-6 mb-2">
+                    <h3 className="text-xl font-bold text-foreground">Good Morning, Nero</h3>
                     <p className="text-sm text-muted-foreground mt-1">Here's an overview of your cluster health and active models</p>
                 </div>
             </div>
 
-            {/* Hero Sparkline Card */}
-            <div className="bg-card border border-border rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
-                <div className="flex items-center gap-5">
-                    <div className="h-14 w-14 rounded-2xl bg-accent flex items-center justify-center">
-                        <Monitor className="h-6 w-6 text-muted-foreground" />
+            {/* Cluster Summary — GPU Utilization */}
+            <div className="bg-card border border-border rounded-2xl p-6 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                    <div className="h-12 w-12 rounded-xl bg-accent flex items-center justify-center">
+                        <Monitor className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <div>
-                        <p className="text-sm font-semibold text-muted-foreground mb-1 uppercase tracking-tight">System GPU Utilization</p>
+                        <p className="text-sm text-muted-foreground mb-1">GPU Utilization</p>
                         <div className="flex items-center gap-3">
-                            <span className="text-4xl font-bold text-foreground tracking-tighter">{gpuUsagePct}%</span>
-                            <Badge className="bg-success/10 text-success border-0 text-xs font-bold px-2 py-0.5 hover:bg-success/10">
-                                ↑ Healthy
+                            <span className="text-3xl font-bold text-foreground">{gpuUsagePct}%</span>
+                            <Badge className="bg-success/10 text-success border-0 text-xs font-medium hover:bg-success/10">
+                                {gpuUsagePct > 80 ? "↑ High" : "↑ Healthy"}
                             </Badge>
                         </div>
                     </div>
                 </div>
-                <div className="flex items-center gap-6 w-full md:w-auto">
-                    <div className="w-48 h-14">
+                <div className="flex items-center gap-6 text-center">
+                    <div>
+                        <p className="text-2xl font-bold text-foreground">{counts.nodes}</p>
+                        <p className="text-xs text-muted-foreground">Nodes</p>
+                    </div>
+                    <div>
+                        <p className="text-2xl font-bold text-foreground">{gpuStats.count}</p>
+                        <p className="text-xs text-muted-foreground">GPUs</p>
+                    </div>
+                    <div>
+                        <p className="text-2xl font-bold text-foreground">{counts.endpoints}</p>
+                        <p className="text-xs text-muted-foreground">Endpoints</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* GPU Memory Usage — Bar Chart (real data) */}
+            <div className="bg-card border border-border rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-lg font-bold text-foreground">GPU Memory Usage</h3>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <span>Total VRAM</span>
+                        <span className="font-bold text-foreground text-lg">{Math.round(gpuStats.total / 1024)} GB</span>
+                    </div>
+                </div>
+                {gpuBarData.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-12 text-center">No GPU data available.</p>
+                ) : (
+                    <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={sparkData}>
-                                <Line
-                                    type="monotone"
-                                    dataKey="v"
-                                    stroke="hsl(var(--muted-foreground))"
-                                    strokeWidth={2}
-                                    dot={false}
-                                    isAnimationActive={true}
+                            <BarChart data={gpuBarData} barGap={2}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} unit=" MB" />
+                                <Tooltip
+                                    contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 13 }}
+                                    formatter={(value: number) => `${value.toLocaleString()} MB`}
                                 />
-                            </LineChart>
+                                <Bar dataKey="memUsed" stackId="a" fill="hsl(var(--chart-1))" name="Used" barSize={40} />
+                                <Bar dataKey="memFree" stackId="a" fill="hsl(var(--chart-2))" name="Free" barSize={40} radius={[4, 4, 0, 0]} />
+                            </BarChart>
                         </ResponsiveContainer>
                     </div>
-                    <div className="h-14 w-14 rounded-2xl border border-border flex items-center justify-center shadow-inner">
-                        <Activity className="h-6 w-6 text-muted-foreground" />
+                )}
+            </div>
+
+            {/* Endpoint Table */}
+            <div className="bg-card border border-border rounded-2xl p-6">
+                <div className="flex items-center gap-3 mb-4">
+                    <div className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 flex-1 max-w-[200px]">
+                        <Search className="h-4 w-4 text-muted-foreground" />
+                        <input
+                            type="text"
+                            placeholder="Search models..."
+                            className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
+                        />
                     </div>
+                    <button className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors">
+                        <Filter className="h-4 w-4" />
+                        All Status
+                    </button>
+                    <button className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors">
+                        <MoreHorizontal className="h-4 w-4" />
+                        More
+                    </button>
                 </div>
-            </div>
 
-            {/* Grid of Stats */}
-            <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-4">
-                <StatsCard
-                    title="Total Nodes"
-                    value={counts.nodes}
-                    subtitle="Active compute nodes"
-                    icon={Server}
-                />
-                <StatsCard
-                    title="Active Endpoints"
-                    value={counts.endpoints}
-                    subtitle="Model instances online"
-                    icon={Cpu}
-                />
-                <StatsCard
-                    title="Cluster Requests"
-                    value={counts.requests}
-                    subtitle="Load requests in queue"
-                    icon={Sparkles}
-                />
-                <StatsCard
-                    title="GPU Count"
-                    value={gpuStats.count}
-                    subtitle="Total visible GPUs"
-                    icon={Activity}
-                />
-            </div>
-
-            {/* Detail Sections */}
-            <div className="grid gap-6 lg:grid-cols-7">
-                <div className="lg:col-span-4 space-y-4">
-                    <div className="flex items-center justify-between px-1">
-                        <h3 className="text-lg font-bold text-foreground">GPU Hardware Overview</h3>
-                        <button className="text-xs font-bold text-muted-foreground hover:text-primary transition-colors">View All Nodes</button>
-                    </div>
-
-                    <div className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-8">
-                        {overview.nodes.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-12 text-center">
-                                <Server className="h-12 w-12 text-muted-foreground/20 mb-3" />
-                                <p className="text-sm font-medium text-muted-foreground">No compute nodes registered in the cluster.</p>
-                            </div>
+                <Table>
+                    <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                            <TableHead className="w-10"><Checkbox /></TableHead>
+                            <TableHead className="font-medium">Model</TableHead>
+                            <TableHead className="font-medium">Node</TableHead>
+                            <TableHead className="font-medium">GPU</TableHead>
+                            <TableHead className="font-medium">Memory</TableHead>
+                            <TableHead className="font-medium">Status</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {endpointRows.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                                    No endpoints online. Load a model to get started.
+                                </TableCell>
+                            </TableRow>
                         ) : (
-                            overview.nodes.map((node) => (
-                                <div key={node.node_id} className="space-y-5">
-                                    <div className="flex items-center gap-3">
-                                        <div className="bg-accent/50 p-1.5 rounded-lg">
-                                            <Server className="h-4 w-4 text-muted-foreground" />
-                                        </div>
-                                        <span className="text-sm font-bold tracking-tight">{node.node_id}</span>
-                                        <Badge variant="secondary" className="text-[10px] font-bold px-1.5 py-0 bg-accent text-accent-foreground">
-                                            {node.gpus.length} GPUs
-                                        </Badge>
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                        {node.gpus.map((gpu) => {
-                                            const model = gpuModel(node.node_id, gpu.index)
-                                            const usage = pct(gpu.memory_used_mb, gpu.memory_total_mb)
-                                            return (
-                                                <div key={gpu.index} className="bg-accent/20 border border-border/40 rounded-xl p-4 space-y-3">
-                                                    <div className="flex items-center justify-between text-xs font-bold">
-                                                        <span className="text-muted-foreground">UNIT {gpu.index}</span>
-                                                        <span className={cn(usage > 80 ? "text-destructive" : "text-primary")}>{usage}%</span>
-                                                    </div>
-                                                    <Progress value={usage} className="h-1.5 bg-border/50" />
-                                                    <div className="flex items-center justify-between text-[10px] font-medium text-muted-foreground/80">
-                                                        <span>
-                                                            {Math.round(gpu.memory_used_mb / 1024 * 10) / 10} / {Math.round(gpu.memory_total_mb / 1024 * 10) / 10} GB
-                                                        </span>
-                                                        {model && (
-                                                            <span className="font-bold text-primary truncate max-w-[120px]">{model}</span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
+                            endpointRows.map((ep) => (
+                                <TableRow key={ep.model}>
+                                    <TableCell><Checkbox /></TableCell>
+                                    <TableCell className="font-mono text-sm">{ep.model}</TableCell>
+                                    <TableCell className="text-sm">{ep.node}</TableCell>
+                                    <TableCell className="text-sm text-muted-foreground">{ep.gpu}</TableCell>
+                                    <TableCell className="text-sm font-medium">{ep.memUsed}</TableCell>
+                                    <TableCell>
+                                        <span className={`text-xs font-medium px-2 py-1 rounded-full ${ep.status === "ready" ? "bg-success/10 text-success" : "bg-accent text-muted-foreground"}`}>
+                                            {ep.status}
+                                        </span>
+                                    </TableCell>
+                                </TableRow>
                             ))
                         )}
-                    </div>
-                </div>
-
-                <div className="lg:col-span-3 space-y-4">
-                    <div className="flex items-center justify-between px-1">
-                        <h3 className="text-lg font-bold text-foreground">Active Endpoints</h3>
-                        <div className="flex h-2 w-2 rounded-full bg-success animate-pulse" />
-                    </div>
-
-                    <div className="bg-card border border-border rounded-2xl p-6 shadow-sm min-h-[400px]">
-                        {overview.endpoints.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-20 text-center">
-                                <Cpu className="h-12 w-12 text-muted-foreground/20 mb-3" />
-                                <p className="text-sm font-medium text-muted-foreground text-center max-w-[200px]">
-                                    No model instances are currently online.
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="space-y-4">
-                                {overview.endpoints.map((ep) => (
-                                    <div
-                                        key={`${ep.model_uid}-${ep.replica_id}`}
-                                        className="flex items-center justify-between rounded-xl border border-border/50 p-4 hover:border-primary/30 hover:bg-sidebar-accent/50 transition-all cursor-pointer group"
-                                    >
-                                        <div className="space-y-1.5">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-sm font-bold font-mono tracking-tight">{ep.model_uid}</span>
-                                                <Badge className="text-[10px] font-bold h-4 bg-success/10 text-success border-0">
-                                                    {ep.status}
-                                                </Badge>
-                                            </div>
-                                            <p className="text-[11px] font-medium text-muted-foreground">
-                                                {ep.node_id} · Unit {ep.gpu_index ?? 'CPU'}
-                                            </p>
-                                        </div>
-                                        <div className="h-8 w-8 rounded-full flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                                            <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
+                    </TableBody>
+                </Table>
             </div>
         </div>
     )

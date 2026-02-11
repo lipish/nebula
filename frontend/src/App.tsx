@@ -1,11 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  RefreshCw,
-} from 'lucide-react'
-
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { apiDelete, apiGet, apiPost } from '@/lib/api'
 import type { ClusterStatus, ModelLoadRequest, ModelRequest } from '@/lib/types'
 
@@ -163,82 +156,52 @@ function App() {
         clusterHealthy={!error && overview.nodes.length > 0}
       />
 
-      <div className="flex flex-1 flex-col ml-64 min-w-0 transition-all duration-300">
-        <header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b border-border/60 bg-background/80 backdrop-blur-md px-10 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-foreground uppercase text-[15px] opacity-80">
-              {page}
-            </h1>
-          </div>
-          <div className="flex items-center gap-6">
-            <Badge
-              className={`font-bold px-3 py-1 border-0 shadow-sm ${error ? 'bg-destructive/10 text-destructive' : 'bg-success/10 text-success'
-                }`}
-            >
-              {error ? 'SYSTEM OFFLINE' : 'CLUSTER HEALTHY'}
-            </Badge>
-            <Separator orientation="vertical" className="h-4" />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={refreshAll}
-              disabled={loading}
-              className="rounded-xl hover:bg-accent/50 transition-all h-10 w-10 active:scale-95"
-            >
-              <RefreshCw className={`h-4 w-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
-              <span className="sr-only">Refresh</span>
-            </Button>
-          </div>
-        </header>
-
-        <main className="flex-1 p-8 md:p-10 max-w-[1600px] w-full mx-auto">
-          {page === 'dashboard' && (
-            <DashboardView
-              overview={overview}
-              counts={counts}
-              gpuStats={gpuStats}
-              gpuModel={gpuModel}
-              pct={pct}
-            />
-          )}
-          {page === 'models' && (
-            <ModelsView
-              overview={overview}
-              requests={requests}
-              showLoadForm={showLoadForm}
-              setShowLoadForm={setShowLoadForm}
-              form={form}
-              setForm={setForm}
-              handleLoadModel={handleLoadModel}
-              handleUnload={handleUnload}
-              selectedGpu={selectedGpu}
-              setSelectedGpu={setSelectedGpu}
-              usedGpus={usedGpus}
-              statusVariant={statusVariant}
-              fmtTime={fmtTime}
-              pct={pct}
-            />
-          )}
-          {page === 'nodes' && (
-            <NodesView
-              overview={overview}
-              gpuModel={gpuModel}
-              pct={pct}
-              fmtTime={fmtTime}
-            />
-          )}
-          {page === 'settings' && (
-            <SettingsView
-              token={token}
-              setToken={setToken}
-              onSaveToken={() => {
-                localStorage.setItem('nebula_token', token)
-                refreshAll()
-              }}
-            />
-          )}
-        </main>
-      </div>
+      <main className="ml-64 p-8 flex-1 min-w-0">
+        {page === 'dashboard' && (
+          <DashboardView
+            overview={overview}
+            counts={counts}
+            gpuStats={gpuStats}
+            pct={pct}
+          />
+        )}
+        {page === 'models' && (
+          <ModelsView
+            overview={overview}
+            requests={requests}
+            showLoadForm={showLoadForm}
+            setShowLoadForm={setShowLoadForm}
+            form={form}
+            setForm={setForm}
+            handleLoadModel={handleLoadModel}
+            handleUnload={handleUnload}
+            selectedGpu={selectedGpu}
+            setSelectedGpu={setSelectedGpu}
+            usedGpus={usedGpus}
+            statusVariant={statusVariant}
+            fmtTime={fmtTime}
+            pct={pct}
+          />
+        )}
+        {page === 'nodes' && (
+          <NodesView
+            overview={overview}
+            gpuModel={gpuModel}
+            pct={pct}
+            fmtTime={fmtTime}
+          />
+        )}
+        {page === 'settings' && (
+          <SettingsView
+            token={token}
+            setToken={setToken}
+            onSaveToken={() => {
+              localStorage.setItem('nebula_token', token)
+              refreshAll()
+            }}
+          />
+        )}
+      </main>
     </div>
   )
 }
