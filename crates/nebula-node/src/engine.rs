@@ -10,6 +10,94 @@ use nebula_common::PlacementAssignment;
 
 use crate::args::Args;
 
+/// Build the standard container name for a model replica.
+pub fn container_name(model_uid: &str, replica_id: u32) -> String {
+    format!("nebula-{}-{}", model_uid, replica_id)
+}
+
+/// Try to reuse an existing Docker container that is already running and healthy.
+/// Returns Some((base_url, engine_model)) if the container is alive and /health returns 200.
+pub async fn try_reuse_container(
+    model_uid: &str,
+    replica_id: u32,
+    _timeout: Duration,
+) -> Option<(String, String)> {
+    let name = container_name(model_uid, replica_id);
+
+    // Check if container is running
+    let output = Command::new("docker")
+        .args(["inspect", "-f", "{{.State.Running}} {{range .NetworkSettings.Ports}}{{(index . 0).HostPort}}{{end}}", &name])
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = stdout.trim();
+    // Expected format: "true 10825"
+    if !stdout.starts_with("true ") {
+        tracing::info!(%name, "container exists but not running, will recreate");
+        return None;
+    }
+
+    let port_str = stdout.strip_prefix("true ")?.trim();
+    let port: u16 = port_str.parse().ok()?;
+    let base_url = format!("http://127.0.0.1:{}", port);
+
+    // Health check
+    let http = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?;
+
+    let health_url = format!("{}/health", base_url);
+    match http.get(&health_url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            tracing::info!(%name, %base_url, "reusing existing healthy container");
+
+            // Try to get the served model name
+            let models_url = format!("{}/v1/models", base_url);
+            let engine_model = match http.get(&models_url).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    let v: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+                    v.get("data")
+                        .and_then(|d| d.get(0))
+                        .and_then(|m| m.get("id"))
+                        .and_then(|id| id.as_str())
+                        .unwrap_or_default()
+                        .to_string()
+                }
+                _ => String::new(),
+            };
+
+            Some((base_url, engine_model))
+        }
+        _ => {
+            tracing::info!(%name, "container running but not healthy, will recreate");
+            None
+        }
+    }
+}
+
+/// Stop and remove a Docker container by name.
+pub async fn stop_docker_container(model_uid: &str, replica_id: u32) {
+    let name = container_name(model_uid, replica_id);
+    tracing::info!(%name, "stopping docker container");
+    // docker stop sends SIGTERM, waits 10s, then SIGKILL
+    let _ = Command::new("docker")
+        .args(["stop", "-t", "10", &name])
+        .output()
+        .await;
+    let _ = Command::new("docker")
+        .args(["rm", "-f", &name])
+        .output()
+        .await;
+}
+
 async fn wait_engine_ready(base_url: &str, timeout: Duration) -> anyhow::Result<String> {
     let http = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(3))
@@ -196,12 +284,11 @@ pub async fn start_vllm(
     let mut cmd;
     if let Some(image) = args.vllm_docker_image.as_deref() {
         // Docker mode
-        let container_name = format!("nebula-{}-{}", model_uid, assignment.replica_id);
+        let cname = container_name(model_uid, assignment.replica_id);
         // Stop & remove any previous container with the same name
-        let _ = Command::new("docker")
-            .args(["rm", "-f", &container_name])
-            .output()
-            .await;
+        stop_docker_container(model_uid, assignment.replica_id).await;
+        // Wait briefly for port release after container removal
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         let gpu_device = if let Some(ref indices) = effective_indices {
             let devs: Vec<String> = indices.iter().map(|i| i.to_string()).collect();
@@ -217,12 +304,11 @@ pub async fn start_vllm(
             model_tag.clone()
         };
 
-        tracing::info!(image=%image, container=%container_name, gpu=%gpu_device, model=%container_model, "launching vLLM via docker");
+        tracing::info!(image=%image, container=%cname, gpu=%gpu_device, model=%container_model, "launching vLLM via docker");
 
         cmd = Command::new("docker");
         cmd.arg("run")
-            .arg("--rm")
-            .arg("--name").arg(&container_name)
+            .arg("--name").arg(&cname)
             .arg("--gpus").arg(&gpu_device)
             .arg("-p").arg(format!("{}:{}", selected_port, selected_port))
             .arg("-v").arg(format!("{}:/model", args.vllm_model_dir));

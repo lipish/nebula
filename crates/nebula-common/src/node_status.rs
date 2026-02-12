@@ -14,4 +14,8 @@ pub struct NodeStatus {
 
     #[serde(default)]
     pub gpus: Vec<GpuStatus>,
+
+    /// Node HTTP API address (e.g. "http://10.21.11.92:9090") for BFF to query containers/images.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_addr: Option<String>,
 }

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 
-use nebula_common::{EndpointInfo, PlacementPlan};
+use nebula_common::{EndpointInfo, EndpointStats, PlacementPlan};
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
 pub async fn endpoints_sync_loop(
@@ -105,6 +105,51 @@ pub async fn placement_sync_loop(
         }
 
         tracing::warn!("placements watch stream ended, reconnecting");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+pub async fn stats_sync_loop(
+    store: EtcdMetaStore,
+    router: Arc<nebula_router::Router>,
+) -> anyhow::Result<()> {
+    loop {
+        // Snapshot: load all existing stats
+        match store.list_prefix("/stats/").await {
+            Ok(items) => {
+                for (_k, v, _rev) in items {
+                    if let Ok(stats) = serde_json::from_slice::<EndpointStats>(&v) {
+                        router.upsert_stats(stats);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error=%e, "failed to list stats, will retry");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        }
+
+        // Watch for changes
+        let mut stream = match store.watch_prefix("/stats/", None).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error=%e, "failed to watch stats, will retry");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+
+        while let Some(ev) = stream.next().await {
+            if let Some(v) = ev.value {
+                if let Ok(stats) = serde_json::from_slice::<EndpointStats>(&v) {
+                    router.upsert_stats(stats);
+                }
+            }
+            // Stats deletion: no action needed, stale stats will be overwritten on next scrape
+        }
+
+        tracing::warn!("stats watch stream ended, reconnecting");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

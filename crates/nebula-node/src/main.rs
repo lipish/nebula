@@ -1,8 +1,10 @@
 mod args;
+mod docker_api;
 mod engine;
 mod gpu;
 mod heartbeat;
 mod reconcile;
+mod scrape;
 mod util;
 
 use clap::Parser;
@@ -38,16 +40,30 @@ async fn main() -> anyhow::Result<()> {
     let endpoint_state: Arc<Mutex<HashMap<String, nebula_common::EndpointInfo>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
+    // shared running state (used by both main reconcile loop and heartbeat)
+    let running: Arc<Mutex<HashMap<String, RunningModel>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
     tokio::spawn(heartbeat_loop(
         store.clone(),
         args.node_id.clone(),
         args.heartbeat_ttl_ms,
         args.heartbeat_interval_ms,
+        args.api_port,
         endpoint_state.clone(),
+        running.clone(),
     ));
 
-    // local running state
-    let mut running: HashMap<String, RunningModel> = HashMap::new();
+    // Start Node HTTP API server
+    let api_addr = format!("0.0.0.0:{}", args.api_port);
+    let api_router = docker_api::node_api_router();
+    let listener = tokio::net::TcpListener::bind(&api_addr).await?;
+    tracing::info!(%api_addr, "node API server listening");
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(listener, api_router).await {
+            tracing::error!(error=%e, "node API server error");
+        }
+    });
 
     // 1. List existing placements to find if any are assigned to us
     let prefix = "/placements/";
@@ -67,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
                     let _ = reconcile_model(
                         &store,
                         &args,
-                        &mut running,
+                        &mut *running.lock().await,
                         &endpoint_state,
                         &mid,
                         Some(plan),
@@ -103,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
                     let _ = reconcile_model(
                         &store,
                         &args,
-                        &mut running,
+                        &mut *running.lock().await,
                         &endpoint_state,
                         &mid,
                         Some(p),
@@ -115,12 +131,12 @@ async fn main() -> anyhow::Result<()> {
                     let model_uid = key.strip_prefix(prefix).unwrap_or(&key);
                     tracing::info!(model=%model_uid, "placement deleted event");
                     let model_uid = model_uid.to_string();
-                    if running.contains_key(&model_uid) {
+                    if running.lock().await.contains_key(&model_uid) {
                         tracing::info!(%model_uid, "stopping model due to deletion");
                         reconcile_model(
                             &store,
                             &args,
-                            &mut running,
+                            &mut *running.lock().await,
                             &endpoint_state,
                             &model_uid,
                             None,

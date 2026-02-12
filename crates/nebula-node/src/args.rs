@@ -69,4 +69,8 @@ pub struct Args {
     /// Optional HuggingFace endpoint mirror for downloading models (sets HF_ENDPOINT).
     #[arg(long)]
     pub vllm_hf_endpoint: Option<String>,
+
+    /// Port for the Node HTTP API (containers, images, etc.).
+    #[arg(long, default_value_t = 9090)]
+    pub api_port: u16,
 }
