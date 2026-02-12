@@ -77,6 +77,8 @@ async fn main() -> Result<()> {
                     node_id: None,
                     gpu_index: None,
                     gpu_indices: None,
+                    min_replicas: None,
+                    max_replicas: None,
                 };
                 let resp = auth(client.post(&url), token.as_ref())
                     .json(&req)

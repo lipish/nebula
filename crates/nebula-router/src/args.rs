@@ -10,4 +10,7 @@ pub struct Args {
 
     #[arg(long, default_value = "qwen2_5_0_5b")]
     pub model_uid: String,
+
+    #[arg(long, default_value = "least_pending")]
+    pub routing_strategy: String,
 }

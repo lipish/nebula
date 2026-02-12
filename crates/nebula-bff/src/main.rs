@@ -17,8 +17,8 @@ use tracing_subscriber::EnvFilter;
 use crate::args::Args;
 use crate::auth::parse_auth_from_env;
 use crate::handlers::{
-    healthz, list_requests, load_model, logs, metrics, overview, search_models, unload_model,
-    whoami,
+    engine_stats, healthz, list_requests, load_model, logs, metrics, overview, search_models,
+    unload_model, whoami,
 };
 use crate::state::AppState;
 
@@ -58,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/models/load", post(load_model))
         .route("/models/requests/:id", delete(unload_model))
         .route("/metrics", get(metrics))
+        .route("/engine-stats", get(engine_stats))
         .route("/logs", get(logs))
         .route("/models/search", get(search_models))
         .layer(middleware::from_fn_with_state(st.clone(), auth::auth_middleware))

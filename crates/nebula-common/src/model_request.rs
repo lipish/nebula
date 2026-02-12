@@ -25,6 +25,14 @@ pub struct ModelLoadRequest {
     /// Optional target GPU indices for multi-GPU placement
     #[serde(default)]
     pub gpu_indices: Option<Vec<u32>>,
+
+    /// Minimum number of replicas (for autoscaling). Defaults to None (use `replicas` as fixed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_replicas: Option<u32>,
+
+    /// Maximum number of replicas (for autoscaling). Defaults to None (use `replicas` as fixed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_replicas: Option<u32>,
 }
 
 fn default_replicas() -> u32 {

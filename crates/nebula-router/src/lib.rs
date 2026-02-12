@@ -3,16 +3,63 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use nebula_common::{EndpointInfo, EndpointStats, EndpointStatus, ExecutionContext};
 
-#[derive(Debug, Default)]
+pub mod strategy;
+
+use strategy::{Candidate, LeastPending, RoutingStrategy};
+
+/// KV cache usage threshold (fraction 0.0–1.0). When ALL endpoints exceed this,
+/// admission control kicks in and returns Overloaded.
+const KV_CACHE_OVERLOAD_THRESHOLD: f64 = 0.95;
+
+#[derive(Debug, Clone)]
+pub enum RouteError {
+    /// No ready endpoint found for the requested model.
+    NoEndpoint,
+    /// All endpoints are overloaded (kv_cache_usage > threshold).
+    Overloaded,
+}
+
+impl std::fmt::Display for RouteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RouteError::NoEndpoint => write!(f, "no ready endpoint"),
+            RouteError::Overloaded => write!(f, "all endpoints overloaded"),
+        }
+    }
+}
+
 pub struct Router {
     endpoints: DashMap<(String, u32), EndpointInfo>,
     stats: DashMap<(String, u32), EndpointStats>,
     session_affinity: DashMap<String, (String, u32)>,
+    strategy: Box<dyn RoutingStrategy>,
+}
+
+impl std::fmt::Debug for Router {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Router")
+            .field("strategy", &self.strategy.name())
+            .finish()
+    }
 }
 
 impl Router {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
+        Self::with_strategy(Box::new(LeastPending))
+    }
+
+    pub fn with_strategy(strategy: Box<dyn RoutingStrategy>) -> Arc<Self> {
+        tracing::info!(strategy = strategy.name(), "router initialized");
+        Arc::new(Self {
+            endpoints: DashMap::new(),
+            stats: DashMap::new(),
+            session_affinity: DashMap::new(),
+            strategy,
+        })
+    }
+
+    pub fn strategy_name(&self) -> &'static str {
+        self.strategy.name()
     }
 
     pub fn replace_all_endpoints(&self, infos: Vec<EndpointInfo>) {
@@ -42,12 +89,52 @@ impl Router {
         self.session_affinity.remove(session_id);
     }
 
+    /// Collect all stats as a slice snapshot (for admission control, etc.).
+    pub fn all_stats_for_model(&self, model_uid: &str) -> Vec<EndpointStats> {
+        self.stats
+            .iter()
+            .filter(|e| e.key().0 == model_uid)
+            .map(|e| e.value().clone())
+            .collect()
+    }
+
+    /// Check if all endpoints for a model are overloaded based on KV cache usage.
+    fn check_overloaded(&self, stats_snapshot: &[Option<EndpointStats>]) -> bool {
+        // Need at least one endpoint with KV cache data to make a judgment
+        let mut has_kv_data = false;
+        let mut all_overloaded = true;
+
+        for s in stats_snapshot.iter().flatten() {
+            if let (Some(used), Some(free)) = (s.kv_cache_used_bytes, s.kv_cache_free_bytes) {
+                has_kv_data = true;
+                let total = used + free;
+                if total > 0 {
+                    let usage = used as f64 / total as f64;
+                    if usage < KV_CACHE_OVERLOAD_THRESHOLD {
+                        all_overloaded = false;
+                        break;
+                    }
+                } else {
+                    all_overloaded = false;
+                    break;
+                }
+            } else {
+                // No KV data for this endpoint — can't confirm overload
+                all_overloaded = false;
+                break;
+            }
+        }
+
+        has_kv_data && all_overloaded
+    }
+
     pub fn route_with_plan_version(
         &self,
         ctx: &ExecutionContext,
         model_uid: &str,
         plan_version: u64,
-    ) -> Option<EndpointInfo> {
+    ) -> Result<EndpointInfo, RouteError> {
+        // Session affinity check
         if let Some(session_id) = ctx.session_id.as_deref() {
             if let Some(aff) = self.session_affinity.get(session_id) {
                 let (aff_model_uid, aff_replica_id) = aff.value();
@@ -58,49 +145,69 @@ impl Router {
                         .map(|v| v.value().clone())
                     {
                         if ep.status == EndpointStatus::Ready && ep.plan_version == plan_version {
-                            return Some(ep);
+                            return Ok(ep);
                         }
                     }
                 }
             }
         }
 
-        let mut best: Option<EndpointInfo> = None;
-        let mut best_pending: u64 = u64::MAX;
+        // Build candidate list: filter by model_uid, Ready, plan_version
+        let filtered: Vec<EndpointInfo> = self
+            .endpoints
+            .iter()
+            .filter(|e| {
+                let ep = e.value();
+                ep.model_uid == model_uid
+                    && ep.status == EndpointStatus::Ready
+                    && ep.plan_version == plan_version
+            })
+            .map(|e| e.value().clone())
+            .collect();
 
-        for entry in self.endpoints.iter() {
-            let ep = entry.value();
-            if ep.model_uid != model_uid {
-                continue;
-            }
-            if ep.status != EndpointStatus::Ready {
-                continue;
-            }
-            if ep.plan_version != plan_version {
-                continue;
-            }
-
-            let pending = self
-                .stats
-                .get(&(ep.model_uid.clone(), ep.replica_id))
-                .map(|s| s.pending_requests)
-                .unwrap_or(0);
-
-            if pending < best_pending {
-                best_pending = pending;
-                best = Some(ep.clone());
-            }
+        if filtered.is_empty() {
+            return Err(RouteError::NoEndpoint);
         }
 
-        if let (Some(session_id), Some(best_ep)) = (ctx.session_id.clone(), best.as_ref()) {
+        let stats_snapshot: Vec<Option<EndpointStats>> = filtered
+            .iter()
+            .map(|ep| {
+                self.stats
+                    .get(&(ep.model_uid.clone(), ep.replica_id))
+                    .map(|s| s.value().clone())
+            })
+            .collect();
+
+        // Admission control: reject if all endpoints are overloaded
+        if self.check_overloaded(&stats_snapshot) {
+            return Err(RouteError::Overloaded);
+        }
+
+        let candidates: Vec<Candidate> = filtered
+            .iter()
+            .zip(stats_snapshot.iter())
+            .map(|(ep, s)| Candidate {
+                endpoint: ep,
+                stats: s.as_ref(),
+            })
+            .collect();
+
+        let selected = self
+            .strategy
+            .select(&candidates)
+            .map(|i| filtered[i].clone())
+            .ok_or(RouteError::NoEndpoint)?;
+
+        if let Some(session_id) = ctx.session_id.clone() {
             self.session_affinity
-                .insert(session_id, (best_ep.model_uid.clone(), best_ep.replica_id));
+                .insert(session_id, (selected.model_uid.clone(), selected.replica_id));
         }
 
-        best
+        Ok(selected)
     }
 
-    pub fn route(&self, ctx: &ExecutionContext, model_uid: &str) -> Option<EndpointInfo> {
+    pub fn route(&self, ctx: &ExecutionContext, model_uid: &str) -> Result<EndpointInfo, RouteError> {
+        // Session affinity check
         if let Some(session_id) = ctx.session_id.as_deref() {
             if let Some(aff) = self.session_affinity.get(session_id) {
                 let (aff_model_uid, aff_replica_id) = aff.value();
@@ -111,42 +218,62 @@ impl Router {
                         .map(|v| v.value().clone())
                     {
                         if ep.status == EndpointStatus::Ready {
-                            return Some(ep);
+                            return Ok(ep);
                         }
                     }
                 }
             }
         }
 
-        let mut best: Option<EndpointInfo> = None;
-        let mut best_pending: u64 = u64::MAX;
+        // Build candidate list: filter by model_uid, Ready
+        let filtered: Vec<EndpointInfo> = self
+            .endpoints
+            .iter()
+            .filter(|e| {
+                let ep = e.value();
+                ep.model_uid == model_uid && ep.status == EndpointStatus::Ready
+            })
+            .map(|e| e.value().clone())
+            .collect();
 
-        for entry in self.endpoints.iter() {
-            let ep = entry.value();
-            if ep.model_uid != model_uid {
-                continue;
-            }
-            if ep.status != EndpointStatus::Ready {
-                continue;
-            }
-
-            let pending = self
-                .stats
-                .get(&(ep.model_uid.clone(), ep.replica_id))
-                .map(|s| s.pending_requests)
-                .unwrap_or(0);
-
-            if pending < best_pending {
-                best_pending = pending;
-                best = Some(ep.clone());
-            }
+        if filtered.is_empty() {
+            return Err(RouteError::NoEndpoint);
         }
 
-        if let (Some(session_id), Some(best_ep)) = (ctx.session_id.clone(), best.as_ref()) {
+        let stats_snapshot: Vec<Option<EndpointStats>> = filtered
+            .iter()
+            .map(|ep| {
+                self.stats
+                    .get(&(ep.model_uid.clone(), ep.replica_id))
+                    .map(|s| s.value().clone())
+            })
+            .collect();
+
+        // Admission control: reject if all endpoints are overloaded
+        if self.check_overloaded(&stats_snapshot) {
+            return Err(RouteError::Overloaded);
+        }
+
+        let candidates: Vec<Candidate> = filtered
+            .iter()
+            .zip(stats_snapshot.iter())
+            .map(|(ep, s)| Candidate {
+                endpoint: ep,
+                stats: s.as_ref(),
+            })
+            .collect();
+
+        let selected = self
+            .strategy
+            .select(&candidates)
+            .map(|i| filtered[i].clone())
+            .ok_or(RouteError::NoEndpoint)?;
+
+        if let Some(session_id) = ctx.session_id.clone() {
             self.session_affinity
-                .insert(session_id, (best_ep.model_uid.clone(), best_ep.replica_id));
+                .insert(session_id, (selected.model_uid.clone(), selected.replica_id));
         }
 
-        best
+        Ok(selected)
     }
 }

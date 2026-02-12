@@ -110,15 +110,15 @@
 | 阶段 | 内容 | 工作量 | 依赖 | 状态 |
 |------|------|--------|------|------|
 | **1.1 Engine Stats Pipeline** | Node heartbeat 采集 vLLM /metrics，写入 etcd /stats/，Router watch 同步 | 2 天 | 无 | ✅ 已完成 |
-| **1.2 Router 请求级指标** | E2E latency / TTFT histogram，per-model 维度 | 1 天 | 无 | |
-| **2.1 路由策略插件化** | RoutingStrategy trait + LeastPending/LeastKvCache/PrefixCacheAware | 2 天 | 1.1 | |
-| **3.1 Scheduler 健康自愈** | reconcile loop，endpoint 超时自动清理与副本补充 | 2 天 | 1.1 | |
-| **3.2 负载驱动扩缩容** | 基于 kv_cache_usage / pending_requests 自动调整 replicas | 3 天 | 1.1 + 3.1 | |
+| **1.2 Router 请求级指标** | E2E latency / TTFT histogram，per-model 维度 | 1 天 | 无 | ✅ 已完成 |
+| **2.1 路由策略插件化** | RoutingStrategy trait + LeastPending/LeastKvCache/PrefixCacheAware | 2 天 | 1.1 | ✅ 已完成 |
+| **3.1 Scheduler 健康自愈** | reconcile loop，endpoint 超时自动清理与副本补充 | 2 天 | 1.1 | ✅ 已完成 |
+| **3.2 负载驱动扩缩容** | 基于 kv_cache_usage / pending_requests 自动调整 replicas | 3 天 | 1.1 + 3.1 | ✅ 已完成 |
 | **4.1 引擎健康检查** | Node 侧 /health 探测，连续失败标记 Unhealthy，自动 docker restart + 冷却期 | 1 天 | 无 | ✅ 已完成 |
-| **4.2 GPU 状态增强** | nvidia-smi 增加 temperature / utilization | 0.5 天 | 无 | |
+| **4.2 GPU 状态增强** | nvidia-smi 增加 temperature / utilization | 0.5 天 | 无 | ✅ 已完成 |
 | **4.3 Docker 容器管理** | 容器复用（Node 重启不杀容器）、正确停止（docker stop）、端口竞争修复 | 1 天 | 无 | ✅ 已完成 |
 | **4.4 容器资产感知** | Node HTTP API 暴露容器/镜像信息（/api/containers, /api/images），BFF 按需拉取 | 0.5 天 | 无 | ✅ 已完成 |
-| **5.1 Admission Control** | 所有 endpoint 过载时返回 429 + Retry-After | 1 天 | 1.1 | |
+| **5.1 Admission Control** | 所有 endpoint 过载时返回 429 + Retry-After | 1 天 | 1.1 | ✅ 已完成 |
 | **6.1 可观测性** | 各组件暴露 Prometheus /metrics，日志接入 Loki，Tracing 接入 Jaeger | 3 天 | 无 | |
 
 ### 建议融入时间线

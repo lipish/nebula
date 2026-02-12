@@ -6,11 +6,12 @@ import { Progress } from "@/components/ui/progress";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import type { ClusterStatus } from "@/lib/types";
+import type { ClusterStatus, EndpointStats } from "@/lib/types";
 
 interface EndpointsProps {
   overview: ClusterStatus;
   pct: (used: number, total: number) => number;
+  engineStats: EndpointStats[];
 }
 
 const statusStyle = (s: string): string => {
@@ -21,8 +22,17 @@ const statusStyle = (s: string): string => {
   return "bg-muted text-muted-foreground";
 };
 
-export function EndpointsView({ overview, pct }: EndpointsProps) {
+export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
   const [search, setSearch] = useState("");
+
+  // Build stats lookup: (model_uid, replica_id) -> EndpointStats
+  const statsMap = useMemo(() => {
+    const m = new Map<string, EndpointStats>();
+    for (const s of engineStats) {
+      m.set(`${s.model_uid}-${s.replica_id}`, s);
+    }
+    return m;
+  }, [engineStats]);
 
   // Build enriched endpoint rows from real data
   const rows = useMemo(() => {
@@ -45,6 +55,13 @@ export function EndpointsView({ overview, pct }: EndpointsProps) {
       // Count replicas for this model
       const replicas = overview.endpoints.filter((e) => e.model_uid === ep.model_uid).length;
 
+      // Engine stats for this endpoint
+      const es = statsMap.get(`${ep.model_uid}-${ep.replica_id}`);
+      const kvUsed = es?.kv_cache_used_bytes ?? 0;
+      const kvFree = es?.kv_cache_free_bytes ?? 0;
+      const kvTotal = kvUsed + kvFree;
+      const kvPct = kvTotal > 0 ? Math.round((kvUsed / kvTotal) * 100) : -1;
+
       return {
         key: `${ep.model_uid}-${ep.replica_id}`,
         model_uid: ep.model_uid,
@@ -57,9 +74,11 @@ export function EndpointsView({ overview, pct }: EndpointsProps) {
         memTotal: gpu?.memory_total_mb ?? 0,
         replicas,
         lastHeartbeat: ep.last_heartbeat_ms,
+        kvPct,
+        pending: es?.pending_requests ?? 0,
       };
     });
-  }, [overview]);
+  }, [overview, statsMap]);
 
   const filtered = useMemo(() => {
     if (!search) return rows;
@@ -139,8 +158,9 @@ export function EndpointsView({ overview, pct }: EndpointsProps) {
               <TableHead className="font-medium">Endpoint</TableHead>
               <TableHead className="font-medium">Node / GPU</TableHead>
               <TableHead className="font-medium">VRAM</TableHead>
+              <TableHead className="font-medium">KV Cache</TableHead>
+              <TableHead className="font-medium">Pending</TableHead>
               <TableHead className="font-medium">Replicas</TableHead>
-              <TableHead className="font-medium">API</TableHead>
               <TableHead className="font-medium">Status</TableHead>
               <TableHead className="w-10"></TableHead>
             </TableRow>
@@ -148,13 +168,14 @@ export function EndpointsView({ overview, pct }: EndpointsProps) {
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                   No endpoints found
                 </TableCell>
               </TableRow>
             ) : (
               filtered.map((ep) => {
                 const memPercent = ep.memTotal > 0 ? pct(ep.memUsed, ep.memTotal) : 0;
+                const kvOverloaded = ep.kvPct > 95;
                 return (
                   <TableRow key={ep.key}>
                     <TableCell><Checkbox /></TableCell>
@@ -181,8 +202,24 @@ export function EndpointsView({ overview, pct }: EndpointsProps) {
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </TableCell>
+                    <TableCell>
+                      {ep.kvPct >= 0 ? (
+                        <div className="w-20">
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className={kvOverloaded ? "text-destructive font-bold" : "text-muted-foreground"}>{ep.kvPct}%</span>
+                          </div>
+                          <Progress value={ep.kvPct} className={`h-1.5 ${kvOverloaded ? "[&>div]:bg-destructive" : ""}`} />
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span className={`text-sm font-bold ${ep.pending > 5 ? "text-yellow-600" : "text-foreground"}`}>
+                        {ep.pending}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-sm font-medium">{ep.replicas}</TableCell>
-                    <TableCell className="text-sm">{ep.api_flavor}</TableCell>
                     <TableCell>
                       <Badge className={statusStyle(ep.status)}>{ep.status}</Badge>
                     </TableCell>

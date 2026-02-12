@@ -80,6 +80,17 @@ export interface ModelSearchResult {
   source: string
 }
 
+export interface EndpointStats {
+  model_uid: string
+  replica_id: number
+  last_updated_ms: number
+  pending_requests: number
+  prefix_cache_hit_rate?: number | null
+  prompt_cache_hit_rate?: number | null
+  kv_cache_used_bytes?: number | null
+  kv_cache_free_bytes?: number | null
+}
+
 export interface ClusterStatus {
   nodes: NodeStatus[]
   endpoints: EndpointInfo[]

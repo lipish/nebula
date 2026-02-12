@@ -77,6 +77,7 @@ pub async fn proxy_chat_completions(
     req: Request<Body>,
 ) -> Response {
     let _ctx = build_execution_context(&headers);
+    let request_start = std::time::Instant::now();
 
     let method = req.method().clone();
     let uri_path = req.uri().path().to_string();
@@ -121,8 +122,20 @@ pub async fn proxy_chat_completions(
     };
 
     let ep = match ep {
-        Some(ep) => ep,
-        None => {
+        Ok(ep) => ep,
+        Err(nebula_router::RouteError::Overloaded) => {
+            st.metrics.record_model_status(&model_uid, 429);
+            return Response::builder()
+                .status(StatusCode::TOO_MANY_REQUESTS)
+                .header("Retry-After", "5")
+                .body(Body::from(format!(
+                    "all endpoints overloaded for model '{}'",
+                    model_uid
+                )))
+                .unwrap_or_else(|_| Response::new(Body::empty()));
+        }
+        Err(_) => {
+            st.metrics.record_model_status(&model_uid, 503);
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("no ready endpoint for model '{}'", model_uid),
@@ -134,6 +147,7 @@ pub async fn proxy_chat_completions(
     let base = match ep.base_url.as_deref() {
         Some(s) => s.trim_end_matches('/'),
         None => {
+            st.metrics.record_model_status(&model_uid, 503);
             return (StatusCode::SERVICE_UNAVAILABLE, "endpoint missing base_url").into_response();
         }
     };
@@ -152,6 +166,8 @@ pub async fn proxy_chat_completions(
         Ok(r) => r,
         Err(e) => {
             tracing::error!(error=%e, "router upstream request failed");
+            st.metrics.record_model_status(&model_uid, 502);
+            st.metrics.observe_e2e_latency(&model_uid, request_start.elapsed().as_secs_f64());
             return (StatusCode::BAD_GATEWAY, "upstream request failed").into_response();
         }
     };
@@ -168,15 +184,27 @@ pub async fn proxy_chat_completions(
     if is_sse {
         let mut upstream = resp.bytes_stream();
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, Infallible>>(64);
+        let metrics = st.metrics.clone();
+        let model_uid_for_stream = model_uid.clone();
+        let status_code = status.as_u16();
         tokio::spawn(async move {
+            let mut first_chunk = true;
             while let Some(item) = upstream.next().await {
                 match item {
                     Ok(b) => {
+                        if first_chunk {
+                            first_chunk = false;
+                            let ttft = request_start.elapsed().as_secs_f64();
+                            metrics.observe_ttft(&model_uid_for_stream, ttft);
+                        }
                         let _ = tx.send(Ok(b)).await;
                     }
                     Err(_) => break,
                 }
             }
+            let e2e = request_start.elapsed().as_secs_f64();
+            metrics.observe_e2e_latency(&model_uid_for_stream, e2e);
+            metrics.record_model_status(&model_uid_for_stream, status_code);
         });
 
         let stream = ReceiverStream::new(rx);
@@ -193,6 +221,10 @@ pub async fn proxy_chat_completions(
         Ok(b) => b,
         Err(_) => Bytes::new(),
     };
+
+    let e2e = request_start.elapsed().as_secs_f64();
+    st.metrics.observe_e2e_latency(&model_uid, e2e);
+    st.metrics.record_model_status(&model_uid, status.as_u16());
 
     let mut out = Response::builder()
         .status(status)

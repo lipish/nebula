@@ -13,8 +13,8 @@ use uuid::Uuid;
 use crate::auth::{AuthContext, Role};
 use crate::state::AppState;
 use nebula_common::{
-    ClusterStatus, EndpointInfo, ModelLoadRequest, ModelRequest, ModelRequestStatus, NodeStatus,
-    PlacementPlan,
+    ClusterStatus, EndpointInfo, EndpointStats, ModelLoadRequest, ModelRequest, ModelRequestStatus,
+    NodeStatus, PlacementPlan,
 };
 use nebula_meta::MetaStore;
 
@@ -257,6 +257,35 @@ pub async fn metrics(
 
 pub async fn logs(State(_st): State<AppState>) -> impl IntoResponse {
     error_response(StatusCode::NOT_IMPLEMENTED, "not_implemented", "logs not implemented")
+}
+
+pub async fn engine_stats(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Viewer) {
+        return resp;
+    }
+
+    let stats_raw = match st.store.list_prefix("/stats/").await {
+        Ok(s) => s,
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "etcd_error",
+                &format!("etcd error: {}", e),
+            )
+        }
+    };
+
+    let mut stats = Vec::new();
+    for (_, v, _) in stats_raw {
+        if let Ok(s) = serde_json::from_slice::<EndpointStats>(&v) {
+            stats.push(s);
+        }
+    }
+
+    (StatusCode::OK, Json(stats)).into_response()
 }
 
 #[derive(Deserialize)]

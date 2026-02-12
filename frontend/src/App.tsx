@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiDelete, apiGet, apiPost } from '@/lib/api'
-import type { ClusterStatus, ModelLoadRequest, ModelRequest } from '@/lib/types'
+import type { ClusterStatus, EndpointStats, ModelLoadRequest, ModelRequest } from '@/lib/types'
 
 // Components
 import Sidebar from '@/components/Sidebar'
@@ -45,6 +45,7 @@ function App() {
   const [page, setPage] = useState<Page>('dashboard')
   const [showLoadDialog, setShowLoadDialog] = useState(false)
   const [metricsRaw, setMetricsRaw] = useState('')
+  const [engineStats, setEngineStats] = useState<EndpointStats[]>([])
 
   const counts = useMemo(
     () => ({
@@ -66,13 +67,19 @@ function App() {
       ])
       setOverview(o)
       setRequests(r)
-      // Fetch gateway metrics (plain text, best-effort)
+      // Fetch metrics and engine stats (best-effort)
       try {
         const BASE_URL = import.meta.env.VITE_BFF_BASE_URL || '/api'
-        const mResp = await fetch(`${BASE_URL}/metrics`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        })
+        const [mResp, sResp] = await Promise.all([
+          fetch(`${BASE_URL}/metrics`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          }),
+          fetch(`${BASE_URL}/engine-stats`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          }),
+        ])
         if (mResp.ok) setMetricsRaw(await mResp.text())
+        if (sResp.ok) setEngineStats(await sResp.json())
       } catch { /* metrics are optional */ }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data')
@@ -209,10 +216,10 @@ function App() {
           />
         )}
         {page === 'inference' && (
-          <InferenceView overview={overview} metricsRaw={metricsRaw} />
+          <InferenceView overview={overview} metricsRaw={metricsRaw} engineStats={engineStats} />
         )}
         {page === 'endpoints' && (
-          <EndpointsView overview={overview} pct={pct} />
+          <EndpointsView overview={overview} pct={pct} engineStats={engineStats} />
         )}
       </main>
     </div>

@@ -1,5 +1,6 @@
 mod args;
 mod planner;
+mod reconcile;
 mod util;
 
 use anyhow::Result;
@@ -27,12 +28,15 @@ async fn main() -> Result<()> {
     let store = EtcdMetaStore::connect(std::slice::from_ref(&args.etcd_endpoint)).await?;
     info!("connected to etcd at {}", args.etcd_endpoint);
 
+    // Spawn reconcile loop (health self-healing)
+    let store_for_reconcile = store.clone();
+    let default_port_for_reconcile = args.default_port;
+    tokio::spawn(async move {
+        reconcile::reconcile_loop(store_for_reconcile, default_port_for_reconcile).await;
+    });
+
     // Watch for model requests
     let prefix = "/model_requests/";
-
-    // In a real system, we'd list existing pending requests first.
-    // For MVP, we'll just start watching or process list once.
-    // Let's do a simple watch loop with reconnection logic.
 
     loop {
         info!("watching prefix: {}", prefix);

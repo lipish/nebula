@@ -32,7 +32,13 @@ async fn main() -> anyhow::Result<()> {
 
     let store =
         nebula_meta::EtcdMetaStore::connect(std::slice::from_ref(&args.etcd_endpoint)).await?;
-    let router = nebula_router::Router::new();
+
+    let strategy = nebula_router::strategy::parse_strategy(&args.routing_strategy)
+        .unwrap_or_else(|e| {
+            tracing::error!(error=%e, "invalid routing strategy");
+            std::process::exit(1);
+        });
+    let router = nebula_router::Router::with_strategy(strategy);
 
     let plan_version = Arc::new(AtomicU64::new(0));
 
