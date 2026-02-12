@@ -2,12 +2,15 @@ export interface GpuStatus {
   index: number
   memory_total_mb: number
   memory_used_mb: number
+  temperature_c?: number | null
+  utilization_gpu?: number | null
 }
 
 export interface NodeStatus {
   node_id: string
   last_heartbeat_ms: number
   gpus: GpuStatus[]
+  api_addr?: string | null
 }
 
 export interface EndpointInfo {

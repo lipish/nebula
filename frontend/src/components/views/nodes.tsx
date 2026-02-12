@@ -1,4 +1,4 @@
-import { Cpu, Server, Activity } from "lucide-react"
+import { Cpu, Server, Activity, Thermometer, Gauge } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import type { ClusterStatus } from "@/lib/types"
@@ -76,6 +76,30 @@ export function NodesView({ overview, gpuModel, pct, fmtTime }: NodesProps) {
                                                     <span>VRAM Usage</span>
                                                     <span className="text-foreground">
                                                         {Math.round(gpu.memory_used_mb / 1024 * 10) / 10}GB / {Math.round(gpu.memory_total_mb / 1024 * 10) / 10}GB
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* Temperature & Utilization */}
+                                            <div className="flex items-center gap-4 text-[11px] font-bold text-muted-foreground/70 uppercase tracking-tighter">
+                                                <div className="flex items-center gap-1.5 flex-1">
+                                                    <Thermometer className="h-3.5 w-3.5" />
+                                                    <span>Temp</span>
+                                                    <span className={cn(
+                                                        "ml-auto text-foreground",
+                                                        gpu.temperature_c != null && gpu.temperature_c > 80 ? "text-destructive" : ""
+                                                    )}>
+                                                        {gpu.temperature_c != null ? `${gpu.temperature_c}°C` : "—"}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 flex-1">
+                                                    <Gauge className="h-3.5 w-3.5" />
+                                                    <span>Util</span>
+                                                    <span className={cn(
+                                                        "ml-auto text-foreground",
+                                                        gpu.utilization_gpu != null && gpu.utilization_gpu > 80 ? "text-destructive" : ""
+                                                    )}>
+                                                        {gpu.utilization_gpu != null ? `${gpu.utilization_gpu}%` : "—"}
                                                     </span>
                                                 </div>
                                             </div>
