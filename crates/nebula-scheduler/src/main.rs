@@ -13,7 +13,7 @@ use nebula_common::{ModelRequest, ModelRequestStatus};
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
 use crate::args::Args;
-use crate::planner::{build_extra_args, build_plan, list_used_resources, select_node_and_gpus};
+use crate::planner::{build_plan_multi, list_used_resources};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -73,17 +73,15 @@ async fn main() -> Result<()> {
                     }
                 };
 
-                let (node_id, gpu_indices) = select_node_and_gpus(&store, &req, &used_gpus)
-                    .await
-                    .unwrap_or((args.default_node_id.clone(), vec![]));
-
-                let mut port = args.default_port;
-                while used_ports.contains(&port) {
-                    port += 1;
-                }
-
-                let extra_args = build_extra_args(&req);
-                let plan = build_plan(&req, node_id, port, gpu_indices, extra_args);
+                let plan = match build_plan_multi(
+                    &store, &req, args.default_port, used_ports, used_gpus,
+                ).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        error!("failed to build placement plan: {}", e);
+                        continue;
+                    }
+                };
 
                 // 3. Write Placement
                 let placement_key = format!("/placements/{}", plan.model_uid);

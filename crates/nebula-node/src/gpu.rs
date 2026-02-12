@@ -4,7 +4,7 @@ use nebula_common::GpuStatus;
 
 pub async fn read_gpu_statuses() -> Vec<GpuStatus> {
     let output = Command::new("nvidia-smi")
-        .arg("--query-gpu=memory.total,memory.used")
+        .arg("--query-gpu=memory.total,memory.used,temperature.gpu,utilization.gpu")
         .arg("--format=csv,noheader,nounits")
         .output()
         .await;
@@ -25,10 +25,14 @@ pub async fn read_gpu_statuses() -> Vec<GpuStatus> {
         }
         let total = parts[0].parse::<u64>().unwrap_or(0);
         let used = parts[1].parse::<u64>().unwrap_or(0);
+        let temperature = parts.get(2).and_then(|s| s.parse::<u32>().ok());
+        let utilization = parts.get(3).and_then(|s| s.parse::<u32>().ok());
         out.push(GpuStatus {
             index: idx as u32,
             memory_total_mb: total,
             memory_used_mb: used,
+            temperature_c: temperature,
+            utilization_gpu: utilization,
         });
     }
     out

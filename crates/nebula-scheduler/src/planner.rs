@@ -166,13 +166,23 @@ pub fn build_extra_args(req: &ModelRequest) -> Option<Vec<String>> {
     }
 }
 
-pub fn build_plan(
-    req: &ModelRequest,
+/// Find the next available port starting from `start`, skipping any in `used`.
+pub fn allocate_port(start: u16, used: &HashSet<u16>) -> u16 {
+    let mut port = start;
+    while used.contains(&port) {
+        port = port.saturating_add(1);
+    }
+    port
+}
+
+fn make_assignment(
+    replica_id: u32,
+    model_uid: &str,
     node_id: String,
     port: u16,
     gpu_indices: Vec<u32>,
     extra_args: Option<Vec<String>>,
-) -> PlacementPlan {
+) -> PlacementAssignment {
     let gpu_index = if gpu_indices.len() == 1 {
         Some(gpu_indices[0])
     } else {
@@ -183,20 +193,58 @@ pub fn build_plan(
     } else {
         Some(gpu_indices)
     };
+    PlacementAssignment {
+        replica_id,
+        node_id,
+        engine_config_path: format!("/tmp/nebula/{}.yaml", model_uid),
+        port,
+        gpu_index,
+        gpu_indices: gpu_indices_field,
+        extra_args,
+    }
+}
 
-    PlacementPlan {
+pub async fn build_plan_multi(
+    store: &EtcdMetaStore,
+    req: &ModelRequest,
+    default_port: u16,
+    mut used_ports: HashSet<u16>,
+    mut used_gpus: HashMap<String, HashSet<u32>>,
+) -> anyhow::Result<PlacementPlan> {
+    let replicas = req.request.replicas.max(1);
+    let extra_args = build_extra_args(req);
+    let mut assignments = Vec::with_capacity(replicas as usize);
+
+    for replica_id in 0..replicas {
+        let (node_id, gpu_indices) =
+            select_node_and_gpus(store, req, &used_gpus).await?;
+
+        let port = allocate_port(default_port, &used_ports);
+        used_ports.insert(port);
+
+        // Mark GPUs as used for subsequent replicas
+        if !gpu_indices.is_empty() {
+            let entry = used_gpus.entry(node_id.clone()).or_default();
+            for &idx in &gpu_indices {
+                entry.insert(idx);
+            }
+        }
+
+        assignments.push(make_assignment(
+            replica_id,
+            &req.request.model_uid,
+            node_id,
+            port,
+            gpu_indices,
+            extra_args.clone(),
+        ));
+    }
+
+    Ok(PlacementPlan {
         request_id: Some(req.id.clone()),
         model_uid: req.request.model_uid.clone(),
         model_name: req.request.model_name.clone(),
         version: now_ms(),
-        assignments: vec![PlacementAssignment {
-            replica_id: 0,
-            node_id,
-            engine_config_path: format!("/tmp/nebula/{}.yaml", req.request.model_uid),
-            port,
-            gpu_index,
-            gpu_indices: gpu_indices_field,
-            extra_args,
-        }],
-    }
+        assignments,
+    })
 }

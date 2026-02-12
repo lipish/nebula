@@ -5,6 +5,14 @@ pub struct GpuStatus {
     pub index: u32,
     pub memory_total_mb: u64,
     pub memory_used_mb: u64,
+
+    /// GPU temperature in Celsius.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature_c: Option<u32>,
+
+    /// GPU compute utilization percentage (0-100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utilization_gpu: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
