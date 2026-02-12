@@ -118,9 +118,13 @@ function App() {
     const m = new Map<string, Set<number>>()
     for (const p of overview.placements) {
       for (const a of p.assignments) {
-        if (a.gpu_index != null) {
-          if (!m.has(a.node_id)) m.set(a.node_id, new Set())
-          m.get(a.node_id)!.add(a.gpu_index)
+        if (!m.has(a.node_id)) m.set(a.node_id, new Set())
+        const set = m.get(a.node_id)!
+        if (a.gpu_index != null) set.add(a.gpu_index)
+        if (Array.isArray(a.gpu_indices)) {
+          for (const idx of a.gpu_indices) {
+            if (typeof idx === 'number') set.add(idx)
+          }
         }
       }
     }
@@ -182,6 +186,7 @@ function App() {
               pct={pct}
               token={token}
               onSubmit={handleLoadModel}
+              onUnloadRequestId={handleUnload}
             />
           </>
         )}

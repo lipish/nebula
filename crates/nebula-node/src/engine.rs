@@ -237,6 +237,7 @@ pub async fn start_vllm(
         cmd.arg("-e").arg("HF_HOME=/model/.cache/huggingface");
         cmd.arg("-e").arg("TRANSFORMERS_CACHE=/model/.cache/huggingface");
         cmd.arg("-e").arg("XDG_CACHE_HOME=/model/.cache");
+        cmd.arg("-e").arg("HF_HUB_DISABLE_XET=1");
 
         cmd.arg(image);
 
@@ -257,6 +258,7 @@ pub async fn start_vllm(
         if let Some(ep) = args.vllm_hf_endpoint.as_deref() {
             cmd.env("HF_ENDPOINT", ep);
         }
+        cmd.env("HF_HUB_DISABLE_XET", "1");
         if let Some(ref indices) = effective_indices {
             let devs: Vec<String> = indices.iter().map(|i| i.to_string()).collect();
             cmd.env("CUDA_VISIBLE_DEVICES", devs.join(","));

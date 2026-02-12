@@ -49,7 +49,28 @@
 - Week 5-6: 后台服务与 Web Console MVP；一键部署脚本；观测仪表盘。
 - Week 7+: LoRA 与高级 OpenAI 兼容特性，运维回滚/自愈完善。
 
-## 7. Week 1-2 具体任务拆解
+## 7. 镜像与模型文件管理（Roadmap）
+
+当前 Nebula 已切换为全容器化部署 vLLM（类似 k8s 思路），由此引出对**引擎镜像**和**模型文件**的统一管理需求：
+
+### 7.1 引擎镜像管理
+- **镜像注册表**：维护可用 vLLM 镜像列表（tag、CUDA 兼容性、大小），前端/CLI 可选择版本。
+- **镜像预拉取**：新节点加入集群时自动 `docker pull` 指定镜像；支持从私有 registry 拉取。
+- **版本策略**：支持 pin 版本（生产稳定）和 rolling（跟踪 nightly），节点级别可覆盖。
+- **清理**：定期清理未使用的旧镜像，释放磁盘空间。
+
+### 7.2 模型文件管理
+- **统一缓存目录**：所有节点使用约定路径（如 `/DATA/Model`）存放模型文件，容器挂载该目录。
+- **模型预热/推送**：支持将模型文件从中心存储（NAS/S3/ModelScope）预推送到指定节点，避免首次加载时下载。
+- **缓存清单**：节点上报已缓存的模型列表，Scheduler 优先调度到已有缓存的节点（亲和性调度）。
+- **空间管理**：监控各节点模型缓存磁盘占用，支持 LRU 淘汰或手动清理。
+
+### 7.3 前端集成
+- Web Console 展示各节点的镜像版本、已缓存模型列表、磁盘占用。
+- Load Model 时提示"该节点已缓存此模型，预计启动更快"。
+- 支持从 UI 触发镜像拉取和模型预热操作。
+
+## 8. Week 1-2 具体任务拆解
 - **Control API 定义**：补全模型/端点/节点/审计对象的 protobuf + OpenAPI；统一错误码与幂等语义；补充拒绝/限流场景的返回格式。
 - **鉴权与 RBAC**：Gateway/Router 引入 API key/JWT 中间件；meta 存储/下发用户与角色映射；CLI 增加 `auth login`、`whoami`、`--token` 支持；提供示例策略（viewer/operator/admin）。
 - **可观测性基线**：各组件暴露指标（请求 QPS/latency、队列长度、调度结果、节点 GPU 内存/利用率）；统一 JSON 日志字段（trace_id/request_id/model/node/endpoint/version）；trace 通过 x-request-id 透传；提供 sample Grafana/Tempo/Loki 配置。

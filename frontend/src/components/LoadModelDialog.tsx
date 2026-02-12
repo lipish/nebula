@@ -58,6 +58,7 @@ interface LoadModelDialogProps {
     pct: (used: number, total: number) => number
     token: string
     onSubmit: (form: ModelLoadRequest, gpu: { nodeId: string; gpuIndices: number[] }) => Promise<void>
+    onUnloadRequestId: (requestId: string) => Promise<void>
 }
 
 function formatDownloads(n: number): string {
@@ -80,6 +81,7 @@ export function LoadModelDialog({
     pct,
     token,
     onSubmit,
+    onUnloadRequestId,
 }: LoadModelDialogProps) {
     const [step, setStep] = useState<Step>("search")
     const [source, setSource] = useState<Source>("huggingface")
@@ -98,6 +100,70 @@ export function LoadModelDialog({
     })
     const [selectedNode, setSelectedNode] = useState<string | null>(null)
     const [selectedGpuIndices, setSelectedGpuIndices] = useState<Set<number>>(new Set())
+
+    const requestIdByModelUid = (() => {
+        const m = new Map<string, string>()
+        for (const r of (overview.model_requests ?? [])) {
+            const rid = (r.id ?? "").toString()
+            const uid = r.request?.model_uid
+            if (!rid || !uid) continue
+            const st = r.status
+            if (typeof st === "string") {
+                const s = st.toLowerCase()
+                if (s.includes("fail") || s.includes("unload")) continue
+            } else if (st && typeof st === "object") {
+                if (Object.prototype.hasOwnProperty.call(st as object, "Failed")) continue
+                if (Object.prototype.hasOwnProperty.call(st as object, "Unloaded")) continue
+            }
+            m.set(uid, rid)
+        }
+        return m
+    })()
+
+    const placementForGpu = (nodeId: string, gpuIndex: number) => {
+        for (const p of overview.placements ?? []) {
+            for (const a of p.assignments ?? []) {
+                if (a.node_id !== nodeId) continue
+                if (a.gpu_index != null && a.gpu_index === gpuIndex) return p
+                const gis = (a.gpu_indices ?? []) as number[]
+                if (Array.isArray(gis) && gis.includes(gpuIndex)) return p
+            }
+        }
+        return null
+    }
+
+    const resolveRequestId = (modelUid: string, placementRequestId?: string | null) => {
+        const rid = (placementRequestId ?? "").toString()
+        if (rid.length > 0) return rid
+        return requestIdByModelUid.get(modelUid) ?? null
+    }
+
+    const occupiedEntries = (() => {
+        const fromPlacements = new Map<string, string>()
+        for (const p of overview.placements ?? []) {
+            const rid = (p.request_id ?? "").toString()
+            if (rid.length > 0) fromPlacements.set(p.model_uid, rid)
+        }
+        if (fromPlacements.size > 0) return Array.from(fromPlacements.entries())
+
+        const fromRequests = new Map<string, string>()
+        for (const r of (overview.model_requests ?? [])) {
+            const rid = (r.id ?? "").toString()
+            if (!rid) continue
+            const uid = r.request?.model_uid
+            if (!uid) continue
+            const st = r.status
+            if (typeof st === "string") {
+                const s = st.toLowerCase()
+                if (s.includes("fail") || s.includes("unload")) continue
+            } else if (st && typeof st === "object") {
+                if (Object.prototype.hasOwnProperty.call(st as object, "Failed")) continue
+                if (Object.prototype.hasOwnProperty.call(st as object, "Unloaded")) continue
+            }
+            fromRequests.set(uid, rid)
+        }
+        return Array.from(fromRequests.entries())
+    })()
 
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -401,6 +467,42 @@ export function LoadModelDialog({
                                     </Badge>
                                 )}
                             </div>
+                            <div className="text-[10px] text-muted-foreground/70">
+                                Percent is <span className="font-semibold">used%</span>. <span className="font-semibold text-destructive">Red</span> means high VRAM usage (&gt; 80% used) or low free VRAM. <span className="font-semibold">IN USE</span> means occupied by an existing placement.
+                            </div>
+
+                            {(occupiedEntries.length > 0 || usedGpus.size > 0) && (
+                                <div className="rounded-xl border border-border/60 bg-background p-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="text-[11px] font-bold text-muted-foreground/80">Occupied Models</div>
+                                        <div className="text-[10px] text-muted-foreground/70">Unload to free GPUs</div>
+                                    </div>
+                                    <div className="mt-2 space-y-2">
+                                        {occupiedEntries.map(([modelUid, requestId]) => (
+                                            <div key={modelUid} className="flex items-center justify-between gap-2">
+                                                <div className="text-[11px] font-mono text-foreground truncate">{modelUid}</div>
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    className="h-7 rounded-lg text-[10px] font-bold"
+                                                    onClick={async () => {
+                                                        await onUnloadRequestId(requestId)
+                                                    }}
+                                                    disabled={submitting}
+                                                >
+                                                    Unload
+                                                </Button>
+                                            </div>
+                                        ))}
+                                        {occupiedEntries.length === 0 && (
+                                            <div className="text-[10px] text-muted-foreground/70">
+                                                No unloadable placements found (missing request_id).
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="grid gap-4 md:grid-cols-2">
                                 {overview.nodes.map((node) => {
                                     const isThisNode = selectedNode === node.node_id
@@ -419,12 +521,19 @@ export function LoadModelDialog({
                                                     const freeGb = (freeMb / 1024).toFixed(1)
                                                     const totalGb = (gpu.memory_total_mb / 1024).toFixed(1)
                                                     const lowVram = freeMb < 4096
+                                                    const usedPlacement = isUsed ? placementForGpu(node.node_id, gpu.index) : null
+                                                    const usedModelUid = usedPlacement?.model_uid ?? null
+                                                    const unloadRequestId = usedModelUid ? resolveRequestId(usedModelUid, usedPlacement?.request_id ?? null) : null
                                                     return (
                                                         <button
                                                             key={gpu.index}
-                                                            onClick={() => toggleGpu(node.node_id, gpu.index)}
+                                                            onClick={() => {
+                                                                if (isUsed && !isSel) return
+                                                                toggleGpu(node.node_id, gpu.index)
+                                                            }}
                                                             className={cn(
                                                                 "flex items-center justify-between rounded-xl border p-3 text-left transition-all shadow-sm",
+                                                                isUsed && !isSel && "opacity-60 cursor-not-allowed",
                                                                 isSel
                                                                     ? "border-primary bg-primary/[0.03] ring-1 ring-primary"
                                                                     : "border-border hover:border-primary/40 hover:bg-accent/30"
@@ -438,9 +547,9 @@ export function LoadModelDialog({
                                                                     </div>
                                                                     <div className="flex items-center gap-2">
                                                                         <span className={cn("text-[10px] font-bold", lowVram ? "text-destructive" : "text-muted-foreground")}>
-                                                                            {freeGb} / {totalGb} GB free
+                                                                            Free {freeGb} GB (Total {totalGb} GB)
                                                                         </span>
-                                                                        <span className="text-[10px] font-bold text-muted-foreground">{usage}%</span>
+                                                                        <span className="text-[10px] font-bold text-muted-foreground">{usage}% used</span>
                                                                     </div>
                                                                 </div>
                                                                 <div className="h-1 w-full bg-accent rounded-full overflow-hidden">
@@ -460,6 +569,21 @@ export function LoadModelDialog({
                                                             </div>
                                                             {isUsed && !isSel && (
                                                                 <Badge className="ml-2 text-[9px] font-bold bg-secondary text-secondary-foreground border-0">IN USE</Badge>
+                                                            )}
+                                                            {isUsed && unloadRequestId && !isSel && (
+                                                                <Button
+                                                                    variant="secondary"
+                                                                    size="sm"
+                                                                    className="ml-2 h-7 rounded-lg text-[10px] font-bold"
+                                                                    onClick={async (e) => {
+                                                                        e.preventDefault()
+                                                                        e.stopPropagation()
+                                                                        await onUnloadRequestId(unloadRequestId)
+                                                                    }}
+                                                                    disabled={submitting}
+                                                                >
+                                                                    释放
+                                                                </Button>
                                                             )}
                                                             {isSel && (
                                                                 <div className="ml-2 h-4 w-4 rounded-full bg-primary flex items-center justify-center">
