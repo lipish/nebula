@@ -17,10 +17,10 @@ const menuItems = [
     { id: 'nodes', icon: Server, label: "Nodes & GPUs" },
     { id: 'inference', icon: Activity, label: "Inference" },
     { id: 'endpoints', icon: Cpu, label: "Endpoints" },
-    { id: 'images', icon: Container, label: "Images" },
     {
         icon: MoreHorizontal, label: "More", hasArrow: true,
         children: [
+            { id: 'images', icon: Container, label: "Images" },
             { id: 'audit', icon: Shield, label: "Audit Logs" },
         ],
     },
