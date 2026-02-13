@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 use nebula_common::{EndpointInfo, EndpointStatus, NodeStatus};
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
+use crate::docker_api::{EngineMetricSnapshot, NodeMetricsSnapshot, SharedNodeMetrics};
 use crate::gpu::read_gpu_statuses;
 use crate::reconcile::RunningModel;
 use crate::util::now_ms;
@@ -50,6 +51,7 @@ pub async fn heartbeat_loop(
     endpoint: Arc<Mutex<HashMap<String, EndpointInfo>>>,
     running: Arc<Mutex<HashMap<String, RunningModel>>>,
     xtrace: Option<xtrace_client::Client>,
+    shared_metrics: SharedNodeMetrics,
 ) {
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -64,6 +66,7 @@ pub async fn heartbeat_loop(
     let key = format!("/nodes/{}/status", node_id);
     loop {
         let mut metric_points: Vec<xtrace_client::MetricPoint> = Vec::new();
+        let mut engine_snapshots: Vec<EngineMetricSnapshot> = Vec::new();
         let gpus = read_gpu_statuses().await;
 
         // Collect GPU metrics for xtrace
@@ -105,6 +108,7 @@ pub async fn heartbeat_loop(
             }
         }
 
+        let gpus_for_metrics = gpus.clone();
         let status = NodeStatus {
             node_id: node_id.clone(),
             last_heartbeat_ms: now_ms(),
@@ -212,8 +216,21 @@ pub async fn heartbeat_loop(
                             }
                         }
 
-                        // Stats are now pushed to xtrace only (via metric_points above).
-                        // No longer written to etcd /stats/.
+                        // Collect for Prometheus /metrics snapshot
+                        let kv_usage = match (stats.kv_cache_used_bytes, stats.kv_cache_free_bytes) {
+                            (Some(used), Some(free)) => {
+                                let total = used + free;
+                                if total > 0 { Some(used as f64 / total as f64) } else { None }
+                            }
+                            _ => None,
+                        };
+                        engine_snapshots.push(EngineMetricSnapshot {
+                            model_uid: rm.model_uid.clone(),
+                            replica_id: rm.replica_id,
+                            pending_requests: stats.pending_requests,
+                            kv_cache_usage: kv_usage,
+                            prefix_cache_hit_rate: stats.prefix_cache_hit_rate,
+                        });
                     }
                 } else {
                     *count += 1;
@@ -243,6 +260,15 @@ pub async fn heartbeat_loop(
                     }
                 }
             }
+        }
+
+        // Update shared Prometheus metrics snapshot
+        {
+            let mut snap = shared_metrics.lock().await;
+            *snap = NodeMetricsSnapshot {
+                gpus: gpus_for_metrics,
+                engines: engine_snapshots,
+            };
         }
 
         // Push metrics to xtrace (non-blocking, best-effort)

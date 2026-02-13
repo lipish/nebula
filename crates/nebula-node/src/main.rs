@@ -62,6 +62,10 @@ async fn main() -> anyhow::Result<()> {
 
     let xtrace = init_xtrace_client(&args);
 
+    // Shared metrics state for Prometheus /metrics endpoint
+    let shared_metrics: docker_api::SharedNodeMetrics =
+        Arc::new(Mutex::new(docker_api::NodeMetricsSnapshot::default()));
+
     tokio::spawn(heartbeat_loop(
         store.clone(),
         args.node_id.clone(),
@@ -71,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
         endpoint_state.clone(),
         running.clone(),
         xtrace,
+        shared_metrics.clone(),
     ));
 
     // Start image manager: watches /images/ registry, pre-pulls and GC
@@ -81,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Start Node HTTP API server
     let api_addr = format!("0.0.0.0:{}", args.api_port);
-    let api_router = docker_api::node_api_router();
+    let api_router = docker_api::node_api_router(shared_metrics);
     let listener = tokio::net::TcpListener::bind(&api_addr).await?;
     tracing::info!(%api_addr, "node API server listening");
     tokio::spawn(async move {
