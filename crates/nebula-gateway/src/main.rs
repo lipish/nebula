@@ -122,6 +122,21 @@ async fn main() {
                 .delete(admin_delete_image),
         )
         .route("/images/status", get(admin_list_image_status))
+        // v2 proxy routes (forwarded to BFF)
+        .route("/v2/models", any(proxy_v2))
+        .route("/v2/models/:model_uid", any(proxy_v2))
+        .route("/v2/models/:model_uid/start", any(proxy_v2))
+        .route("/v2/models/:model_uid/stop", any(proxy_v2))
+        .route("/v2/models/:model_uid/scale", any(proxy_v2))
+        .route("/v2/models/:model_uid/save-as-template", any(proxy_v2))
+        .route("/v2/templates", any(proxy_v2))
+        .route("/v2/templates/:id", any(proxy_v2))
+        .route("/v2/templates/:id/deploy", any(proxy_v2))
+        .route("/v2/nodes/:node_id/cache", any(proxy_v2))
+        .route("/v2/nodes/:node_id/disk", any(proxy_v2))
+        .route("/v2/cache/summary", any(proxy_v2))
+        .route("/v2/alerts", any(proxy_v2))
+        .route("/v2/migrate", any(proxy_v2))
         .with_state(st.clone());
 
     let app = Router::new()
@@ -133,7 +148,6 @@ async fn main() {
         .route("/v1/embeddings", post(proxy_post))
         .route("/v1/rerank", post(proxy_post))
         .route("/v1/models", get(list_models))
-        .route("/v1/admin/v2/{*rest}", any(proxy_v2))
         .nest("/v1/admin", admin_routes)
         // Global middleware
         .layer(middleware::from_fn_with_state(st.clone(), audit::audit_middleware))

@@ -235,7 +235,7 @@ pub async fn proxy_v2(
     let bff_base = st.bff_url.trim_end_matches('/');
     let uri_path = req.uri().path().to_string();
     let rest = uri_path
-        .strip_prefix("/v1/admin/v2")
+        .strip_prefix("/v2")
         .unwrap_or(&uri_path);
     let uri_query = req
         .uri()
