@@ -6,7 +6,8 @@ use std::time::Duration;
 use tracing::{info, warn};
 
 use nebula_common::{
-    EndpointInfo, EndpointStats, EndpointStatus, ModelRequest, ModelRequestStatus, PlacementPlan,
+    DesiredState, EndpointInfo, EndpointStats, EndpointStatus, ModelDeployment, ModelRequest,
+    ModelRequestStatus, PlacementPlan,
 };
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
@@ -86,7 +87,7 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
         }
     }
 
-    // 3. Load all model requests (to know desired replica count)
+    // 3. Load all model requests (to know desired replica count — legacy path)
     let request_kvs = store.list_prefix("/model_requests/").await?;
     let mut requests: HashMap<String, ModelRequest> = HashMap::new();
     for (_, val, _) in &request_kvs {
@@ -99,22 +100,41 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
         }
     }
 
+    // 3b. Also load deployments (new declarative path)
+    let deployment_kvs = store.list_prefix("/deployments/").await?;
+    let mut deployments: HashMap<String, ModelDeployment> = HashMap::new();
+    for (_, val, _) in &deployment_kvs {
+        if let Ok(dep) = serde_json::from_slice::<ModelDeployment>(val) {
+            if dep.desired_state == DesiredState::Running {
+                deployments.insert(dep.model_uid.clone(), dep);
+            }
+        }
+    }
+
     // 4. Load stats from xtrace (for autoscaling decisions)
     let stats_by_model = fetch_stats_from_xtrace(xtrace).await;
 
     // 5. For each placement, reconcile
     for plan in &plans {
-        let req_opt = requests.get(&plan.model_uid);
-        let base_replicas = req_opt
-            .map(|r| r.request.replicas.max(1))
-            .unwrap_or(plan.assignments.len() as u32);
-        let min_replicas = req_opt
-            .and_then(|r| r.request.min_replicas)
-            .unwrap_or(1)
-            .max(1);
-        let max_replicas = req_opt
-            .and_then(|r| r.request.max_replicas)
-            .unwrap_or(base_replicas);
+        // Check deployment first (new path), fallback to old model_request
+        let (base_replicas, min_replicas, max_replicas) =
+            if let Some(dep) = deployments.get(&plan.model_uid) {
+                let base = dep.replicas.max(1);
+                let min = dep.min_replicas.unwrap_or(1).max(1);
+                let max = dep.max_replicas.unwrap_or(base);
+                (base, min, max)
+            } else if let Some(req) = requests.get(&plan.model_uid) {
+                let base = req.request.replicas.max(1);
+                let min = req.request.min_replicas.unwrap_or(1).max(1);
+                let max = req.request.max_replicas.unwrap_or(base);
+                (base, min, max)
+            } else {
+                (
+                    plan.assignments.len() as u32,
+                    1,
+                    plan.assignments.len() as u32,
+                )
+            };
 
         // Compute desired replicas: start from base, adjust by load signals
         let current_replicas = plan.assignments.len() as u32;
@@ -206,88 +226,26 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
                 "attempting to add replacement replicas"
             );
 
-            // Get the original request for scheduling parameters
+            // Get scheduling parameters from deployment (new path) or request (legacy)
             if let Some(req) = requests.get(&plan.model_uid) {
-                let (mut used_ports, mut used_gpus) =
-                    list_used_resources(store).await.unwrap_or_default();
-
-                // Also mark ports/GPUs from our healthy assignments as used
-                for a in &new_assignments {
-                    used_ports.insert(a.port);
-                    if let Some(indices) = a.effective_gpu_indices() {
-                        let entry = used_gpus.entry(a.node_id.clone()).or_default();
-                        for idx in indices {
-                            entry.insert(idx);
-                        }
-                    }
-                }
-
-                // Find the next available replica_id
-                let max_existing_id = new_assignments
-                    .iter()
-                    .map(|a| a.replica_id)
-                    .max()
-                    .unwrap_or(0);
-
-                let extra_args = crate::planner::build_extra_args(req);
-
-                for i in 0..deficit {
-                    let new_replica_id = max_existing_id + 1 + i;
-
-                    match select_node_and_gpus(store, req, &used_gpus).await {
-                        Ok((node_id, gpu_indices)) => {
-                            let port = allocate_port(default_port, &used_ports);
-                            used_ports.insert(port);
-
-                            if !gpu_indices.is_empty() {
-                                let entry = used_gpus.entry(node_id.clone()).or_default();
-                                for &idx in &gpu_indices {
-                                    entry.insert(idx);
-                                }
-                            }
-
-                            let gpu_index = if gpu_indices.len() == 1 {
-                                Some(gpu_indices[0])
-                            } else {
-                                gpu_indices.first().copied()
-                            };
-                            let gpu_indices_field = if gpu_indices.is_empty() {
-                                None
-                            } else {
-                                Some(gpu_indices)
-                            };
-
-                            new_assignments.push(nebula_common::PlacementAssignment {
-                                replica_id: new_replica_id,
-                                node_id,
-                                engine_config_path: format!(
-                                    "/tmp/nebula/{}.yaml",
-                                    plan.model_uid
-                                ),
-                                port,
-                                gpu_index,
-                                gpu_indices: gpu_indices_field,
-                                extra_args: extra_args.clone(),
-                                engine_type: None,
-                                docker_image: None,
-                            });
-
-                            info!(
-                                model_uid=%plan.model_uid,
-                                replica_id=new_replica_id,
-                                "added replacement assignment"
-                            );
-                        }
-                        Err(e) => {
-                            warn!(
-                                model_uid=%plan.model_uid,
-                                error=%e,
-                                "failed to find node for replacement replica"
-                            );
-                            break;
-                        }
-                    }
-                }
+                add_replacement_replicas_from_request(
+                    store,
+                    plan,
+                    req,
+                    deficit,
+                    default_port,
+                    &mut new_assignments,
+                )
+                .await;
+            } else if deployments.contains_key(&plan.model_uid) {
+                add_replacement_replicas_from_plan(
+                    store,
+                    plan,
+                    deficit,
+                    default_port,
+                    &mut new_assignments,
+                )
+                .await;
             }
         }
 
@@ -321,6 +279,201 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
     }
 
     Ok(())
+}
+
+/// Add replacement replicas using the original ModelRequest for scheduling parameters (legacy path).
+async fn add_replacement_replicas_from_request(
+    store: &EtcdMetaStore,
+    plan: &PlacementPlan,
+    req: &ModelRequest,
+    deficit: u32,
+    default_port: u16,
+    new_assignments: &mut Vec<nebula_common::PlacementAssignment>,
+) {
+    let (mut used_ports, mut used_gpus) = list_used_resources(store).await.unwrap_or_default();
+
+    for a in new_assignments.iter() {
+        used_ports.insert(a.port);
+        if let Some(indices) = a.effective_gpu_indices() {
+            let entry = used_gpus.entry(a.node_id.clone()).or_default();
+            for idx in indices {
+                entry.insert(idx);
+            }
+        }
+    }
+
+    let max_existing_id = new_assignments
+        .iter()
+        .map(|a| a.replica_id)
+        .max()
+        .unwrap_or(0);
+
+    let extra_args = crate::planner::build_extra_args(req);
+
+    for i in 0..deficit {
+        let new_replica_id = max_existing_id + 1 + i;
+
+        match select_node_and_gpus(store, req, &used_gpus).await {
+            Ok((node_id, gpu_indices)) => {
+                let port = allocate_port(default_port, &used_ports);
+                used_ports.insert(port);
+
+                if !gpu_indices.is_empty() {
+                    let entry = used_gpus.entry(node_id.clone()).or_default();
+                    for &idx in &gpu_indices {
+                        entry.insert(idx);
+                    }
+                }
+
+                let gpu_index = if gpu_indices.len() == 1 {
+                    Some(gpu_indices[0])
+                } else {
+                    gpu_indices.first().copied()
+                };
+                let gpu_indices_field = if gpu_indices.is_empty() {
+                    None
+                } else {
+                    Some(gpu_indices)
+                };
+
+                new_assignments.push(nebula_common::PlacementAssignment {
+                    replica_id: new_replica_id,
+                    node_id,
+                    engine_config_path: format!("/tmp/nebula/{}.yaml", plan.model_uid),
+                    port,
+                    gpu_index,
+                    gpu_indices: gpu_indices_field,
+                    extra_args: extra_args.clone(),
+                    engine_type: None,
+                    docker_image: None,
+                });
+
+                info!(
+                    model_uid=%plan.model_uid,
+                    replica_id=new_replica_id,
+                    "added replacement assignment (from request)"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    model_uid=%plan.model_uid,
+                    error=%e,
+                    "failed to find node for replacement replica"
+                );
+                break;
+            }
+        }
+    }
+}
+
+/// Add replacement replicas for deployment-managed plans.
+/// Re-uses existing plan assignments' extra_args/engine_type/docker_image as template.
+async fn add_replacement_replicas_from_plan(
+    store: &EtcdMetaStore,
+    plan: &PlacementPlan,
+    deficit: u32,
+    default_port: u16,
+    new_assignments: &mut Vec<nebula_common::PlacementAssignment>,
+) {
+    let (mut used_ports, mut used_gpus) = list_used_resources(store).await.unwrap_or_default();
+
+    for a in new_assignments.iter() {
+        used_ports.insert(a.port);
+        if let Some(indices) = a.effective_gpu_indices() {
+            let entry = used_gpus.entry(a.node_id.clone()).or_default();
+            for idx in indices {
+                entry.insert(idx);
+            }
+        }
+    }
+
+    let max_existing_id = new_assignments
+        .iter()
+        .map(|a| a.replica_id)
+        .max()
+        .unwrap_or(0);
+
+    // Use the first existing assignment as a template for extra_args/engine_type/docker_image
+    let template = plan.assignments.first();
+    let extra_args = template.and_then(|a| a.extra_args.clone());
+    let engine_type = template.and_then(|a| a.engine_type.clone());
+    let docker_image = template.and_then(|a| a.docker_image.clone());
+
+    // Build a minimal ModelRequest-like struct for node selection.
+    // We use the plan's existing config (from extra_args) to infer required resources.
+    let dummy_req = ModelRequest {
+        id: String::new(),
+        request: nebula_common::ModelLoadRequest {
+            model_name: plan.model_name.clone(),
+            model_uid: plan.model_uid.clone(),
+            replicas: 1,
+            config: None,
+            node_id: None,
+            gpu_index: None,
+            gpu_indices: None,
+            engine_type: engine_type.clone(),
+            docker_image: docker_image.clone(),
+            min_replicas: None,
+            max_replicas: None,
+        },
+        status: ModelRequestStatus::Scheduled,
+        created_at_ms: 0,
+    };
+
+    for i in 0..deficit {
+        let new_replica_id = max_existing_id + 1 + i;
+
+        match select_node_and_gpus(store, &dummy_req, &used_gpus).await {
+            Ok((node_id, gpu_indices)) => {
+                let port = allocate_port(default_port, &used_ports);
+                used_ports.insert(port);
+
+                if !gpu_indices.is_empty() {
+                    let entry = used_gpus.entry(node_id.clone()).or_default();
+                    for &idx in &gpu_indices {
+                        entry.insert(idx);
+                    }
+                }
+
+                let gpu_index = if gpu_indices.len() == 1 {
+                    Some(gpu_indices[0])
+                } else {
+                    gpu_indices.first().copied()
+                };
+                let gpu_indices_field = if gpu_indices.is_empty() {
+                    None
+                } else {
+                    Some(gpu_indices)
+                };
+
+                new_assignments.push(nebula_common::PlacementAssignment {
+                    replica_id: new_replica_id,
+                    node_id,
+                    engine_config_path: format!("/tmp/nebula/{}.yaml", plan.model_uid),
+                    port,
+                    gpu_index,
+                    gpu_indices: gpu_indices_field,
+                    extra_args: extra_args.clone(),
+                    engine_type: engine_type.clone(),
+                    docker_image: docker_image.clone(),
+                });
+
+                info!(
+                    model_uid=%plan.model_uid,
+                    replica_id=new_replica_id,
+                    "added replacement assignment (from deployment)"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    model_uid=%plan.model_uid,
+                    error=%e,
+                    "failed to find node for replacement replica"
+                );
+                break;
+            }
+        }
+    }
 }
 
 /// Fetch latest engine stats from xtrace, grouped by model_uid.

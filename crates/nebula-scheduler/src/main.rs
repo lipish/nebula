@@ -14,12 +14,12 @@ use clap::Parser;
 use futures_util::StreamExt;
 use tracing::{error, info, warn};
 
-use nebula_common::{ModelRequest, ModelRequestStatus};
+use nebula_common::{DesiredState, ModelDeployment, ModelRequest, ModelRequestStatus, ModelSpec};
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
 use crate::args::Args;
 use crate::metrics::{healthz_handler, metrics_handler, SharedMetrics};
-use crate::planner::{build_plan_multi, list_used_resources};
+use crate::planner::{build_plan_from_deployment, build_plan_multi, list_used_resources};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -90,7 +90,14 @@ async fn main() -> Result<()> {
         .await;
     });
 
-    // Watch for model requests
+    // Spawn deployment watch loop (new declarative path)
+    let store_for_deploy = store.clone();
+    let default_port_for_deploy = args.default_port;
+    tokio::spawn(async move {
+        deployment_watch_loop(store_for_deploy, default_port_for_deploy).await;
+    });
+
+    // Watch for model requests (legacy path)
     let prefix = "/model_requests/";
 
     loop {
@@ -182,6 +189,185 @@ async fn main() -> Result<()> {
         }
 
         warn!("watch stream ended, reconnecting...");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+
+/// Watch `/deployments/` prefix for the new declarative model management flow.
+async fn deployment_watch_loop(store: EtcdMetaStore, default_port: u16) {
+    let prefix = "/deployments/";
+    loop {
+        info!("watching prefix: {}", prefix);
+        let mut stream = match store.watch_prefix(prefix, None).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!("failed to watch deployments: {}, retrying in 5s", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+
+        while let Some(event) = stream.next().await {
+            match event.value {
+                Some(value) => {
+                    // Deployment created or updated
+                    let deployment: ModelDeployment = match serde_json::from_slice(&value) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            warn!("failed to deserialize deployment: {}", e);
+                            continue;
+                        }
+                    };
+
+                    if deployment.desired_state == DesiredState::Running {
+                        info!(
+                            model_uid=%deployment.model_uid,
+                            replicas=deployment.replicas,
+                            "deployment running: building placement plan"
+                        );
+
+                        // Read ModelSpec
+                        let spec_key = format!("/models/{}/spec", deployment.model_uid);
+                        let spec: ModelSpec = match store.get(&spec_key).await {
+                            Ok(Some((val, _))) => match serde_json::from_slice(&val) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    warn!(
+                                        model_uid=%deployment.model_uid,
+                                        error=%e,
+                                        "failed to deserialize model spec, skipping"
+                                    );
+                                    continue;
+                                }
+                            },
+                            Ok(None) => {
+                                warn!(
+                                    model_uid=%deployment.model_uid,
+                                    "model spec not found at {}, skipping",
+                                    spec_key
+                                );
+                                continue;
+                            }
+                            Err(e) => {
+                                error!(
+                                    model_uid=%deployment.model_uid,
+                                    error=%e,
+                                    "failed to read model spec"
+                                );
+                                continue;
+                            }
+                        };
+
+                        let (used_ports, used_gpus) = match list_used_resources(&store).await {
+                            Ok(v) => v,
+                            Err(e) => {
+                                warn!("failed to list placements: {}", e);
+                                (
+                                    std::collections::HashSet::new(),
+                                    std::collections::HashMap::new(),
+                                )
+                            }
+                        };
+
+                        let plan = match build_plan_from_deployment(
+                            &store,
+                            &spec,
+                            &deployment,
+                            default_port,
+                            used_ports,
+                            used_gpus,
+                        )
+                        .await
+                        {
+                            Ok(p) => p,
+                            Err(e) => {
+                                error!(
+                                    model_uid=%deployment.model_uid,
+                                    error=%e,
+                                    "failed to build placement plan from deployment"
+                                );
+                                continue;
+                            }
+                        };
+
+                        let placement_key = format!("/placements/{}", plan.model_uid);
+                        match serde_json::to_vec(&plan) {
+                            Ok(val) => {
+                                if let Err(e) = store.put(&placement_key, val, None).await {
+                                    error!(
+                                        model_uid=%deployment.model_uid,
+                                        error=%e,
+                                        "failed to write placement"
+                                    );
+                                } else {
+                                    info!(
+                                        model_uid=%deployment.model_uid,
+                                        "wrote placement to {}",
+                                        placement_key
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                error!(
+                                    model_uid=%deployment.model_uid,
+                                    error=%e,
+                                    "failed to serialize placement plan"
+                                );
+                            }
+                        }
+                    } else if deployment.desired_state == DesiredState::Stopped {
+                        info!(
+                            model_uid=%deployment.model_uid,
+                            "deployment stopped: deleting placement"
+                        );
+                        let placement_key = format!("/placements/{}", deployment.model_uid);
+                        if let Err(e) = store.delete(&placement_key).await {
+                            warn!(
+                                model_uid=%deployment.model_uid,
+                                error=%e,
+                                "failed to delete placement {}",
+                                placement_key
+                            );
+                        } else {
+                            info!(
+                                model_uid=%deployment.model_uid,
+                                "deleted placement {}",
+                                placement_key
+                            );
+                        }
+                    }
+                }
+                None => {
+                    // Deployment deleted — extract model_uid from key
+                    let model_uid = event.key.strip_prefix(prefix).unwrap_or(&event.key);
+                    if model_uid.is_empty() {
+                        continue;
+                    }
+                    info!(
+                        model_uid=%model_uid,
+                        "deployment deleted: deleting placement"
+                    );
+                    let placement_key = format!("/placements/{}", model_uid);
+                    if let Err(e) = store.delete(&placement_key).await {
+                        warn!(
+                            model_uid=%model_uid,
+                            error=%e,
+                            "failed to delete placement {}",
+                            placement_key
+                        );
+                    } else {
+                        info!(
+                            model_uid=%model_uid,
+                            "deleted placement {}",
+                            placement_key
+                        );
+                    }
+                }
+            }
+        }
+
+        warn!("deployment watch stream ended, reconnecting...");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
