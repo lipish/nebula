@@ -21,4 +21,8 @@ pub struct Args {
     /// Bearer token for xtrace authentication.
     #[arg(long, env = "XTRACE_TOKEN")]
     pub xtrace_token: Option<String>,
+
+    /// Log output format: "text" (human-readable, default) or "json" (structured).
+    #[arg(long, env = "NEBULA_LOG_FORMAT", default_value = "text")]
+    pub log_format: String,
 }

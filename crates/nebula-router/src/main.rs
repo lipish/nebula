@@ -29,6 +29,7 @@ async fn main() -> anyhow::Result<()> {
         "nebula-router",
         args.xtrace_url.as_deref(),
         args.xtrace_token.as_deref(),
+        &args.log_format,
     );
 
     let store =

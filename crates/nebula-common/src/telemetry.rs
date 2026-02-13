@@ -11,6 +11,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 /// - `otlp_endpoint`: if `Some`, traces are exported via OTLP/HTTP to this base URL
 ///   (e.g. "http://10.21.11.92:8742/api/public/otel"). The exporter appends `/v1/traces`.
 /// - `otlp_token`: bearer token for xtrace authentication
+/// - `log_format`: `"text"` (default human-readable) or `"json"` (structured JSON lines)
 ///
 /// Returns an optional `SdkTracerProvider` that the caller should keep alive
 /// and call `shutdown()` on before exit.
@@ -18,11 +19,9 @@ pub fn init_tracing(
     service_name: &str,
     otlp_endpoint: Option<&str>,
     otlp_token: Option<&str>,
+    log_format: &str,
 ) -> Option<TracerProvider> {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
-
-    let fmt_layer = tracing_subscriber::fmt::layer();
+    let use_json = log_format.eq_ignore_ascii_case("json");
 
     if let Some(endpoint) = otlp_endpoint {
         let mut headers = std::collections::HashMap::new();
@@ -32,40 +31,94 @@ pub fn init_tracing(
             }
         }
 
-        let exporter = match opentelemetry_otlp::SpanExporter::builder()
-            .with_http()
-            .with_endpoint(endpoint)
-            .with_headers(headers)
-            .build()
-        {
-            Ok(e) => e,
-            Err(err) => {
-                eprintln!("failed to create OTLP exporter: {err}, falling back to stdout only");
-                tracing_subscriber::registry()
-                    .with(env_filter)
-                    .with(fmt_layer)
-                    .init();
-                return None;
-            }
+        let build_exporter = || {
+            opentelemetry_otlp::SpanExporter::builder()
+                .with_http()
+                .with_endpoint(endpoint)
+                .with_headers(headers.clone())
+                .build()
         };
 
-        let provider = TracerProvider::builder()
-            .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
-            .with_resource(Resource::new([KeyValue::new("service.name", service_name.to_string())]))
-            .build();
+        if use_json {
+            let env_filter = EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info"));
+            let fmt_layer = tracing_subscriber::fmt::layer().json();
 
-        let otel_layer = tracing_opentelemetry::layer()
-            .with_tracer(provider.tracer(service_name.to_string()));
+            let exporter = match build_exporter() {
+                Ok(e) => e,
+                Err(err) => {
+                    eprintln!("failed to create OTLP exporter: {err}, falling back to stdout only");
+                    tracing_subscriber::registry()
+                        .with(env_filter)
+                        .with(fmt_layer)
+                        .init();
+                    return None;
+                }
+            };
 
+            let provider = TracerProvider::builder()
+                .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+                .with_resource(Resource::new([KeyValue::new("service.name", service_name.to_string())]))
+                .build();
+
+            let otel_layer = tracing_opentelemetry::layer()
+                .with_tracer(provider.tracer(service_name.to_string()));
+
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(fmt_layer)
+                .with(otel_layer)
+                .init();
+
+            tracing::info!(endpoint, service_name, "OTLP tracing enabled (json)");
+            Some(provider)
+        } else {
+            let env_filter = EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info"));
+            let fmt_layer = tracing_subscriber::fmt::layer();
+
+            let exporter = match build_exporter() {
+                Ok(e) => e,
+                Err(err) => {
+                    eprintln!("failed to create OTLP exporter: {err}, falling back to stdout only");
+                    tracing_subscriber::registry()
+                        .with(env_filter)
+                        .with(fmt_layer)
+                        .init();
+                    return None;
+                }
+            };
+
+            let provider = TracerProvider::builder()
+                .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+                .with_resource(Resource::new([KeyValue::new("service.name", service_name.to_string())]))
+                .build();
+
+            let otel_layer = tracing_opentelemetry::layer()
+                .with_tracer(provider.tracer(service_name.to_string()));
+
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(fmt_layer)
+                .with(otel_layer)
+                .init();
+
+            tracing::info!(endpoint, service_name, "OTLP tracing enabled");
+            Some(provider)
+        }
+    } else if use_json {
+        let env_filter = EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("info"));
+        let fmt_layer = tracing_subscriber::fmt::layer().json();
         tracing_subscriber::registry()
             .with(env_filter)
             .with(fmt_layer)
-            .with(otel_layer)
             .init();
-
-        tracing::info!(endpoint, service_name, "OTLP tracing enabled");
-        Some(provider)
+        None
     } else {
+        let env_filter = EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("info"));
+        let fmt_layer = tracing_subscriber::fmt::layer();
         tracing_subscriber::registry()
             .with(env_filter)
             .with(fmt_layer)

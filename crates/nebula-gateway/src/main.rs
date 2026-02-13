@@ -40,6 +40,7 @@ async fn main() {
         "nebula-gateway",
         args.xtrace_url.as_deref(),
         args.xtrace_token.as_deref(),
+        &args.log_format,
     );
     let router_base_url = args.router_url;
 
