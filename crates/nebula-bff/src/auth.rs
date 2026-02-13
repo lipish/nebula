@@ -1,112 +1,50 @@
-use std::env;
+// Thin wrapper around nebula_common::auth with backward-compatible env parsing.
 
-use axum::{
-    extract::State,
-    http::{header, Request, StatusCode},
-    middleware::Next,
-    response::IntoResponse,
-};
+pub use nebula_common::auth::{require_role, AuthConfig, AuthContext, Role};
 
-use crate::state::AppState;
+use std::collections::HashMap;
+use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    Admin,
-    Operator,
-    Viewer,
-}
+/// Parse BFF auth configuration from environment variables.
+///
+/// 1. First tries the shared `NEBULA_AUTH_TOKENS` format (via nebula_common).
+/// 2. If that returns `enabled: false`, falls back to the legacy per-role
+///    env vars: `BFF_ADMIN_TOKEN`, `BFF_OPERATOR_TOKEN`, `BFF_VIEWER_TOKEN`.
+pub fn parse_bff_auth_from_env() -> AuthConfig {
+    let shared = nebula_common::auth::parse_auth_from_env();
+    if shared.enabled {
+        return shared;
+    }
 
-#[derive(Debug, Clone)]
-pub struct AuthContext {
-    pub principal: String,
-    pub role: Role,
-}
+    // Legacy fallback: read individual BFF_*_TOKEN env vars.
+    let admin = std::env::var("BFF_ADMIN_TOKEN").ok();
+    let operator = std::env::var("BFF_OPERATOR_TOKEN").ok();
+    let viewer = std::env::var("BFF_VIEWER_TOKEN").ok();
 
-#[derive(Debug, Clone, Default)]
-pub struct AuthConfig {
-    pub admin_token: Option<String>,
-    pub operator_token: Option<String>,
-    pub viewer_token: Option<String>,
-}
+    let has_any = admin.is_some() || operator.is_some() || viewer.is_some();
 
-pub fn parse_auth_from_env() -> AuthConfig {
+    let mut tokens = HashMap::new();
+    if let Some(t) = admin {
+        tokens.insert(t, Role::Admin);
+    }
+    if let Some(t) = operator {
+        tokens.insert(t, Role::Operator);
+    }
+    if let Some(t) = viewer {
+        tokens.insert(t, Role::Viewer);
+    }
+
+    if !has_any {
+        tracing::warn!("auth disabled: neither NEBULA_AUTH_TOKENS nor BFF_*_TOKEN vars set");
+    }
+
     AuthConfig {
-        admin_token: env::var("BFF_ADMIN_TOKEN").ok(),
-        operator_token: env::var("BFF_OPERATOR_TOKEN").ok(),
-        viewer_token: env::var("BFF_VIEWER_TOKEN").ok(),
-    }
-}
-
-pub async fn auth_middleware(
-    State(st): State<AppState>,
-    mut req: Request<axum::body::Body>,
-    next: Next,
-) -> impl IntoResponse {
-    let auth_header = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("");
-
-    let token = auth_header.strip_prefix("Bearer ").unwrap_or("").trim();
-
-    let ctx = if st.auth.is_empty() {
-        // No BFF tokens configured — allow all requests as admin.
-        Some(AuthContext {
-            principal: "anonymous".to_string(),
-            role: Role::Admin,
-        })
-    } else if let Some(ctx) = st.auth.match_token(token) {
-        Some(ctx)
-    } else {
-        None
-    };
-
-    let Some(ctx) = ctx else {
-        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
-    };
-
-    req.extensions_mut().insert(ctx);
-    next.run(req).await
-}
-
-impl AuthConfig {
-    fn is_empty(&self) -> bool {
-        self.admin_token.is_none() && self.operator_token.is_none() && self.viewer_token.is_none()
-    }
-
-    fn match_token(&self, token: &str) -> Option<AuthContext> {
-        if token.is_empty() {
-            return None;
-        }
-
-        if let Some(admin) = &self.admin_token {
-            if token == admin {
-                return Some(AuthContext {
-                    principal: "admin".to_string(),
-                    role: Role::Admin,
-                });
-            }
-        }
-
-        if let Some(operator) = &self.operator_token {
-            if token == operator {
-                return Some(AuthContext {
-                    principal: "operator".to_string(),
-                    role: Role::Operator,
-                });
-            }
-        }
-
-        if let Some(viewer) = &self.viewer_token {
-            if token == viewer {
-                return Some(AuthContext {
-                    principal: "viewer".to_string(),
-                    role: Role::Viewer,
-                });
-            }
-        }
-
-        None
+        enabled: has_any,
+        tokens: Arc::new(tokens),
+        rate_limits: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        limit_per_minute: std::env::var("NEBULA_AUTH_RATE_LIMIT_PER_MINUTE")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(120),
     }
 }

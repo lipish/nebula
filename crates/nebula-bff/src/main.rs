@@ -15,7 +15,7 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::args::Args;
-use crate::auth::parse_auth_from_env;
+use crate::auth::parse_bff_auth_from_env;
 use crate::handlers::{
     audit_logs, delete_image, engine_stats, get_image, healthz, list_image_status, list_images,
     list_requests, load_model, logs, metrics, observe_metrics_names, observe_metrics_query,
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(1);
         });
 
-    let auth = parse_auth_from_env();
+    let auth = parse_bff_auth_from_env();
 
     let st = AppState {
         store: Arc::new(store),
@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/images", get(list_images))
         .route("/images/status", get(list_image_status))
         .route("/images/:id", get(get_image).put(put_image).delete(delete_image))
-        .layer(middleware::from_fn_with_state(st.clone(), auth::auth_middleware))
+        .layer(middleware::from_fn_with_state(st.clone(), nebula_common::auth::auth_middleware::<AppState>))
         .with_state(st.clone());
 
     let api_routes = Router::new()

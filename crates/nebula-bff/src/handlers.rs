@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::auth::{AuthContext, Role};
+use crate::auth::{require_role, AuthContext, Role};
 use crate::state::AppState;
 use nebula_common::{
     ClusterStatus, EndpointInfo, EndpointStats, ModelLoadRequest, ModelRequest, ModelRequestStatus,
@@ -44,29 +44,7 @@ fn error_response(status: StatusCode, code: &str, message: &str) -> Response {
     (status, Json(body)).into_response()
 }
 
-fn require_role(ctx: &AuthContext, required: Role) -> Option<Response> {
-    let current = role_rank(ctx.role);
-    let needed = role_rank(required);
-    if current < needed {
-        Some(
-            error_response(
-                StatusCode::FORBIDDEN,
-                "forbidden",
-                "insufficient permissions",
-            ),
-        )
-    } else {
-        None
-    }
-}
 
-fn role_rank(role: Role) -> u8 {
-    match role {
-        Role::Admin => 3,
-        Role::Operator => 2,
-        Role::Viewer => 1,
-    }
-}
 
 pub async fn healthz() -> impl IntoResponse {
     Json(json!({"status": "ok"}))
@@ -74,9 +52,9 @@ pub async fn healthz() -> impl IntoResponse {
 
 pub async fn whoami(Extension(ctx): Extension<AuthContext>) -> impl IntoResponse {
     let role = match ctx.role {
-        crate::auth::Role::Admin => "admin",
-        crate::auth::Role::Operator => "operator",
-        crate::auth::Role::Viewer => "viewer",
+        Role::Admin => "admin",
+        Role::Operator => "operator",
+        Role::Viewer => "viewer",
     };
 
     Json(json!({

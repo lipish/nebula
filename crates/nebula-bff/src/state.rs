@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use reqwest::Client;
 
+use nebula_common::auth::AuthConfig;
 use nebula_meta::EtcdMetaStore;
-
-use crate::auth::AuthConfig;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -14,4 +13,10 @@ pub struct AppState {
     pub auth: AuthConfig,
     pub xtrace_url: String,
     pub xtrace_token: String,
+}
+
+impl AsRef<AuthConfig> for AppState {
+    fn as_ref(&self) -> &AuthConfig {
+        &self.auth
+    }
 }
