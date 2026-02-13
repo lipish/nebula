@@ -12,4 +12,6 @@ pub struct AppState {
     pub http: Client,
     pub router_url: String,
     pub auth: AuthConfig,
+    pub xtrace_url: String,
+    pub xtrace_token: String,
 }

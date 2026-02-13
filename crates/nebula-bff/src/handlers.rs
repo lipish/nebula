@@ -483,6 +483,89 @@ async fn load_model_with_request(
     (StatusCode::OK, Json(json!({"request_id": request_id, "status": "pending"}))).into_response()
 }
 
+/// Generic helper: proxy a GET request to xtrace, forwarding query string and bearer token.
+async fn xtrace_proxy_get(st: &AppState, path: &str, raw_query: Option<&str>) -> Response {
+    let base = st.xtrace_url.trim_end_matches('/');
+    let url = match raw_query {
+        Some(q) if !q.is_empty() => format!("{path}?{q}", path = format!("{base}{path}"), q = q),
+        _ => format!("{base}{path}"),
+    };
+
+    let mut req = st.http.get(&url);
+    if !st.xtrace_token.is_empty() {
+        req = req.bearer_auth(&st.xtrace_token);
+    }
+
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                "xtrace_error",
+                &format!("xtrace request failed: {}", e),
+            )
+        }
+    };
+
+    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let body: serde_json::Value = match resp.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                "xtrace_error",
+                &format!("failed to parse xtrace response: {}", e),
+            )
+        }
+    };
+
+    (status, Json(body)).into_response()
+}
+
+pub async fn observe_traces(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    req: axum::extract::Request,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Viewer) {
+        return resp;
+    }
+    xtrace_proxy_get(&st, "/api/public/traces", req.uri().query()).await
+}
+
+pub async fn observe_trace_detail(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(trace_id): Path<String>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Viewer) {
+        return resp;
+    }
+    xtrace_proxy_get(&st, &format!("/api/public/traces/{trace_id}"), None).await
+}
+
+pub async fn observe_metrics_query(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    req: axum::extract::Request,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Viewer) {
+        return resp;
+    }
+    xtrace_proxy_get(&st, "/api/public/metrics/query", req.uri().query()).await
+}
+
+pub async fn observe_metrics_names(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    req: axum::extract::Request,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Viewer) {
+        return resp;
+    }
+    xtrace_proxy_get(&st, "/api/public/metrics/names", req.uri().query()).await
+}
+
 async fn unload_model_inner(st: AppState, id: String) -> Response {
     if id.is_empty() {
         return error_response(
