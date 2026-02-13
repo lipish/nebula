@@ -4,6 +4,7 @@ mod engine;
 mod gpu;
 mod heartbeat;
 mod image_manager;
+mod model_cache_manager;
 mod reconcile;
 mod util;
 
@@ -83,6 +84,13 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(image_manager::image_manager_loop(
         store.clone(),
         args.node_id.clone(),
+    ));
+
+    // Start model cache scanner: periodically scans model_dir and reports to etcd
+    tokio::spawn(model_cache_manager::model_cache_scan_loop(
+        store.clone(),
+        args.node_id.clone(),
+        args.vllm_model_dir.clone(),
     ));
 
     // Start Node HTTP API server

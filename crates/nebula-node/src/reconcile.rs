@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 
-use nebula_common::{EndpointInfo, EndpointKind, EndpointStatus, ModelRequest, ModelRequestStatus, PlacementPlan};
+use nebula_common::{EndpointInfo, EndpointKind, EndpointStatus, ModelRequest, ModelRequestStatus, ModelSpec, PlacementPlan};
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
 use crate::args::Args;
@@ -132,6 +132,35 @@ pub async fn reconcile_model(
                 mark_request_failed(store, request_id, reason).await;
             }
             return Ok(());
+        }
+    }
+
+    // Pre-download model files if a ModelSpec exists (ensures model is ready before engine start).
+    let spec_key = format!("/models/{}/spec", model_uid);
+    if let Ok(Some((spec_bytes, _))) = store.get(&spec_key).await {
+        if let Ok(spec) = serde_json::from_slice::<ModelSpec>(&spec_bytes) {
+            tracing::info!(%model_uid, source=?spec.model_source, "ensuring model files are available");
+            if let Err(e) = crate::model_cache_manager::download_model_if_needed(
+                store,
+                &args.node_id,
+                model_uid,
+                &spec.model_name,
+                &spec.model_source,
+                spec.model_path.as_deref(),
+                &args.vllm_model_dir,
+                assignment.replica_id,
+                args.vllm_hf_endpoint.as_deref(),
+                args.vllm_use_modelscope,
+            )
+            .await
+            {
+                let reason = format!("model download failed: {}", e);
+                tracing::error!(%model_uid, error=%e, "model download failed");
+                if let Some(request_id) = plan.request_id.as_deref() {
+                    mark_request_failed(store, request_id, reason).await;
+                }
+                return Ok(());
+            }
         }
     }
 
