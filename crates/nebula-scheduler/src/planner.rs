@@ -182,6 +182,8 @@ fn make_assignment(
     port: u16,
     gpu_indices: Vec<u32>,
     extra_args: Option<Vec<String>>,
+    engine_type: Option<String>,
+    docker_image: Option<String>,
 ) -> PlacementAssignment {
     let gpu_index = if gpu_indices.len() == 1 {
         Some(gpu_indices[0])
@@ -201,8 +203,8 @@ fn make_assignment(
         gpu_index,
         gpu_indices: gpu_indices_field,
         extra_args,
-        engine_type: None,
-        docker_image: None,
+        engine_type,
+        docker_image,
     }
 }
 
@@ -239,6 +241,8 @@ pub async fn build_plan_multi(
             port,
             gpu_indices,
             extra_args.clone(),
+            req.request.engine_type.clone(),
+            req.request.docker_image.clone(),
         ));
     }
 

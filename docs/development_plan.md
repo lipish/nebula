@@ -2,7 +2,8 @@
 
 ## 1. 现状概览
 - 控制面与执行面链路已打通：动态模型加载、调度、Node 多进程多模型、Embeddings、CLI 基础管理能力（list/load/unload/status）。
-- 仍缺：可观测性基线（Prometheus /metrics 标准暴露）、一键部署（helm chart）、审计日志、多引擎抽象、镜像/模型文件管理。
+- 仍缺：可观测性基线（Prometheus /metrics 标准暴露）、一键部署（helm chart）。
+- ✅ 已完成：审计日志、多引擎抽象（vLLM + SGLang）、镜像管理、前端多引擎集成。
 
 ## 2. 目标
 - 提供“可观测、可管控、可扩展”的生产级控制面：统一 Control API、鉴权、审计、可观测性、容量感知调度、友好管理体验（CLI + Web）。
@@ -53,7 +54,7 @@
 
 当前 Nebula 已切换为全容器化部署 vLLM（类似 k8s 思路），由此引出对**引擎镜像**和**模型文件**的统一管理需求：
 
-### 7.1 多引擎 × 多硬件 × 多模型适配
+### 7.1 多引擎 × 多硬件 × 多模型适配（引擎抽象 ✅，硬件感知调度待做）
 
 现实中不同硬件、引擎、模型之间存在复杂的适配关系，极端情况下某张卡 + 某个引擎 + 某个模型才有最优性能：
 
@@ -88,10 +89,30 @@
 - **缓存清单**：节点上报已缓存的模型列表，Scheduler 优先调度到已有缓存的节点（亲和性调度）。
 - **空间管理**：监控各节点模型缓存磁盘占用，支持 LRU 淘汰或手动清理。
 
-### 7.4 前端集成
-- Web Console 展示各节点的镜像版本、已缓存模型列表、磁盘占用。
-- Load Model 时提示"该节点已缓存此模型，预计启动更快"。
-- 支持从 UI 触发镜像拉取和模型预热操作。
+### 7.4 前端集成 ✅（多引擎 + 镜像管理已完成）
+- ✅ Images 页面：镜像注册表 CRUD、各节点镜像拉取状态查看。
+- ✅ Load Model 对话框：Engine Type 选择（vLLM / SGLang）+ Docker Image 下拉（从注册表按引擎类型过滤）。
+- ✅ Models 页面：显示每个部署请求的引擎类型；FAILED 状态含镜像缺失提示时显示 "Go to Images →" 快捷跳转。
+- ✅ Endpoints 页面：Engine 列显示每个端点使用的引擎类型（vLLM / SGLang）。
+- 待做：Load Model 时提示"该节点已缓存此模型，预计启动更快"。
+- 待做：从 UI 触发模型预热操作。
+
+### 7.5 多引擎支持 ✅
+
+**架构**：
+- `Engine` trait 抽象引擎生命周期（start / stop / health_check / scrape_stats / try_restart / try_reuse）。
+- `create_engine` 工厂函数根据 `engine_type` 创建对应实现，支持 `docker_image` 覆盖。
+- 去掉全局 engine 单例，每个 `RunningModel` 持有自己的 `Arc<dyn Engine>`。
+- `reconcile_model` 根据 `PlacementAssignment.engine_type` 动态创建引擎实例。
+
+**已实现引擎**：
+- **VllmEngine**（`engine/vllm.rs`）：Docker + 本地二进制模式，vLLM Prometheus 指标解析。
+- **SglangEngine**（`engine/sglang.rs`）：Docker + 本地二进制模式（`--ipc=host`），SGLang Prometheus 指标解析。
+
+**端到端数据流**：
+前端 Load Model → `engine_type` / `docker_image` 写入 `ModelLoadRequest` → Gateway 存入 etcd → Scheduler 写入 `PlacementAssignment` → Node reconcile 读取 → `create_engine` 创建对应引擎 → 启动前镜像预检查（`docker images -q`），缺失则 FAILED 并提示用户去 Images 页面注册拉取。
+
+**扩展方式**：新增引擎只需在 `engine/` 下创建新文件实现 Engine trait，在 `create_engine` 工厂注册，在 `args.rs` 加对应参数。
 
 ## 8. Week 1-2 具体任务拆解
 - **Control API 定义**：补全模型/端点/节点/审计对象的 protobuf + OpenAPI；统一错误码与幂等语义；补充拒绝/限流场景的返回格式。

@@ -11,6 +11,7 @@ interface ModelsProps {
     onOpenLoadDialog: () => void
     handleUnload: (id: string) => Promise<void>
     fmtTime: (v: number) => string
+    onNavigate?: (page: string) => void
 }
 
 export function ModelsView({
@@ -19,6 +20,7 @@ export function ModelsView({
     onOpenLoadDialog,
     handleUnload,
     fmtTime,
+    onNavigate,
 }: ModelsProps) {
     const endpointByModel = new Map<string, EndpointInfo[]>()
     for (const ep of endpoints) {
@@ -132,8 +134,16 @@ export function ModelsView({
                                                 <div className="space-y-1">
                                                     <Badge className={badgeClass}>{st.label}</Badge>
                                                     {st.variant === "failed" && st.reason && (
-                                                        <div className="text-[10px] font-mono text-muted-foreground/80 max-w-[360px] truncate">
-                                                            {st.reason}
+                                                        <div className="text-[10px] font-mono text-muted-foreground/80 max-w-[360px]">
+                                                            <span className="truncate block">{st.reason}</span>
+                                                            {st.reason.toLowerCase().includes("image") && onNavigate && (
+                                                                <button
+                                                                    onClick={() => onNavigate("images")}
+                                                                    className="text-primary hover:underline font-sans font-bold mt-0.5 block"
+                                                                >
+                                                                    Go to Images →
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
@@ -144,6 +154,10 @@ export function ModelsView({
                                             </TableCell>
                                             <TableCell>
                                                 <div className="flex items-center gap-3">
+                                                    <div className="text-center bg-accent/30 rounded-lg px-2 py-1">
+                                                        <p className="text-[9px] font-bold text-muted-foreground uppercase">Engine</p>
+                                                        <p className="text-xs font-bold">{req.request.engine_type === "sglang" ? "SGLang" : "vLLM"}</p>
+                                                    </div>
                                                     {req.request.config?.max_model_len && (
                                                         <div className="text-center bg-accent/30 rounded-lg px-2 py-1">
                                                             <p className="text-[9px] font-bold text-muted-foreground uppercase">Context</p>

@@ -33,6 +33,14 @@ pub struct ModelLoadRequest {
     /// Maximum number of replicas (for autoscaling). Defaults to None (use `replicas` as fixed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_replicas: Option<u32>,
+
+    /// Engine type to use for this model (e.g. "vllm", "sglang"). Defaults to "vllm".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_type: Option<String>,
+
+    /// Docker image override for the engine. If set, takes precedence over node CLI config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker_image: Option<String>,
 }
 
 fn default_replicas() -> u32 {

@@ -110,6 +110,31 @@ pub async fn reconcile_model(
         ready_timeout: Duration::from_secs(args.ready_timeout_secs),
     };
 
+    // Pre-check: if a docker image is specified, verify it exists locally.
+    // This gives the user a clear error instead of a long timeout or cryptic docker failure.
+    if let Some(image) = assignment.docker_image.as_deref() {
+        let output = tokio::process::Command::new("docker")
+            .args(["images", "-q", image])
+            .output()
+            .await;
+        let exists = match output {
+            Ok(o) => o.status.success() && !o.stdout.is_empty(),
+            Err(_) => false,
+        };
+        if !exists {
+            let reason = format!(
+                "Docker image '{}' not found on this node. \
+                 Please register and pre-pull the image via the Images page before deploying.",
+                image
+            );
+            tracing::error!(%model_uid, %image, "docker image not available locally");
+            if let Some(request_id) = plan.request_id.as_deref() {
+                mark_request_failed(store, request_id, reason).await;
+            }
+            return Ok(());
+        }
+    }
+
     // Try to reuse an existing instance before starting a new one.
     let handle = if let Some(h) = engine.try_reuse(&ctx).await {
         tracing::info!(%model_uid, base_url=%h.base_url, engine=%engine.engine_type(), "reused existing engine instance");

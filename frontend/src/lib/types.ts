@@ -34,6 +34,8 @@ export interface PlacementAssignment {
   gpu_index?: number | null
   gpu_indices?: number[] | null
   extra_args?: string[] | null
+  engine_type?: string | null
+  docker_image?: string | null
 }
 
 export interface PlacementPlan {
@@ -60,6 +62,8 @@ export interface ModelLoadRequest {
   node_id?: string | null
   gpu_index?: number | null
   gpu_indices?: number[] | null
+  engine_type?: string | null
+  docker_image?: string | null
 }
 
 export interface ModelRequest {

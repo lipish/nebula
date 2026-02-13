@@ -80,6 +80,8 @@ async fn main() -> Result<()> {
                     gpu_indices: None,
                     min_replicas: None,
                     max_replicas: None,
+                    engine_type: None,
+                    docker_image: None,
                 };
                 let resp = auth(client.post(&url), token.as_ref())
                     .json(&req)

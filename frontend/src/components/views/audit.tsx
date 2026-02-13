@@ -166,12 +166,12 @@ export function AuditView({ token }: AuditViewProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[180px]">Time</TableHead>
-              <TableHead>Principal</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Action</TableHead>
-              <TableHead className="w-[80px]">Status</TableHead>
-              <TableHead className="w-[90px] text-right">Latency</TableHead>
+              <TableHead className="w-[180px] px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Time</TableHead>
+              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Principal</TableHead>
+              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Role</TableHead>
+              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Action</TableHead>
+              <TableHead className="w-[80px] px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Status</TableHead>
+              <TableHead className="w-[90px] text-right px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Latency</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

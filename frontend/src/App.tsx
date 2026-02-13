@@ -188,6 +188,7 @@ function App() {
               onOpenLoadDialog={() => setShowLoadDialog(true)}
               handleUnload={handleUnload}
               fmtTime={fmtTime}
+              onNavigate={(p) => setPage(p as Page)}
             />
             <LoadModelDialog
               open={showLoadDialog}

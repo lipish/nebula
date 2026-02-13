@@ -62,6 +62,17 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
       const kvTotal = kvUsed + kvFree;
       const kvPct = kvTotal > 0 ? Math.round((kvUsed / kvTotal) * 100) : -1;
 
+      // Resolve engine_type from placement assignment
+      let engineType: string | null = null;
+      for (const p of overview.placements) {
+        if (p.model_uid !== ep.model_uid) continue;
+        for (const a of p.assignments) {
+          if (a.node_id === ep.node_id && a.replica_id === ep.replica_id) {
+            engineType = a.engine_type ?? null;
+          }
+        }
+      }
+
       return {
         key: `${ep.model_uid}-${ep.replica_id}`,
         model_uid: ep.model_uid,
@@ -76,6 +87,7 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
         lastHeartbeat: ep.last_heartbeat_ms,
         kvPct,
         pending: es?.pending_requests ?? 0,
+        engineType,
       };
     });
   }, [overview, statsMap]);
@@ -160,6 +172,7 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
               <TableHead className="font-medium">VRAM</TableHead>
               <TableHead className="font-medium">KV Cache</TableHead>
               <TableHead className="font-medium">Pending</TableHead>
+              <TableHead className="font-medium">Engine</TableHead>
               <TableHead className="font-medium">Replicas</TableHead>
               <TableHead className="font-medium">Status</TableHead>
               <TableHead className="w-10"></TableHead>
@@ -168,7 +181,7 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                   No endpoints found
                 </TableCell>
               </TableRow>
@@ -218,6 +231,11 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
                       <span className={`text-sm font-bold ${ep.pending > 5 ? "text-yellow-600" : "text-foreground"}`}>
                         {ep.pending}
                       </span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-[10px] font-bold">
+                        {ep.engineType === "sglang" ? "SGLang" : "vLLM"}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-sm font-medium">{ep.replicas}</TableCell>
                     <TableCell>

@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { apiGetWithParams } from "@/lib/api"
-import type { ClusterStatus, ModelLoadRequest, ModelSearchResult } from "@/lib/types"
+import { apiGet, apiGetWithParams } from "@/lib/api"
+import type { ClusterStatus, EngineImage, ModelLoadRequest, ModelSearchResult } from "@/lib/types"
 
 type Step = "search" | "configure"
 type Source = "huggingface" | "modelscope"
@@ -97,9 +97,11 @@ export function LoadModelDialog({
         model_uid: "",
         replicas: 1,
         config: {},
+        engine_type: "vllm",
     })
     const [selectedNode, setSelectedNode] = useState<string | null>(null)
     const [selectedGpuIndices, setSelectedGpuIndices] = useState<Set<number>>(new Set())
+    const [engineImages, setEngineImages] = useState<EngineImage[]>([])
 
     const requestIdByModelUid = (() => {
         const m = new Map<string, string>()
@@ -175,7 +177,7 @@ export function LoadModelDialog({
         setSearchError(null)
         setSelectedModel(null)
         setSubmitting(false)
-        setForm({ model_name: "", model_uid: "", replicas: 1, config: {} })
+        setForm({ model_name: "", model_uid: "", replicas: 1, config: {}, engine_type: "vllm" })
         setSelectedNode(null)
         setSelectedGpuIndices(new Set())
     }, [])
@@ -183,6 +185,16 @@ export function LoadModelDialog({
     useEffect(() => {
         if (!open) resetState()
     }, [open, resetState])
+
+    // Fetch registered engine images when dialog opens
+    useEffect(() => {
+        if (!open) return
+        apiGet<EngineImage[]>("/admin/images", token)
+            .then(setEngineImages)
+            .catch(() => setEngineImages([]))
+    }, [open, token])
+
+    const imagesForEngine = engineImages.filter(img => img.engine_type === (form.engine_type ?? "vllm"))
 
     const doSearch = useCallback(async (q: string, src: Source) => {
         if (q.trim().length < 2) {
@@ -229,6 +241,10 @@ export function LoadModelDialog({
             model_uid: generateModelUid(model.id),
         }))
         setStep("configure")
+    }, [])
+
+    const handleEngineChange = useCallback((engineType: string) => {
+        setForm(prev => ({ ...prev, engine_type: engineType, docker_image: null }))
     }, [])
 
     const handleBack = useCallback(() => {
@@ -600,6 +616,49 @@ export function LoadModelDialog({
                             {selectedGpuIndices.size > 1 && (
                                 <p className="text-[11px] text-muted-foreground">
                                     Multi-GPU selected — tensor_parallel_size will be set to {selectedGpuIndices.size} automatically.
+                                </p>
+                            )}
+                        </div>
+
+                        {/* Engine selection */}
+                        <div className="space-y-3">
+                            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Engine</label>
+                            <div className="flex gap-2">
+                                <div className="flex rounded-xl border border-border overflow-hidden">
+                                    {["vllm", "sglang"].map((eng) => (
+                                        <button
+                                            key={eng}
+                                            onClick={() => handleEngineChange(eng)}
+                                            className={cn(
+                                                "px-4 py-1.5 text-xs font-bold transition-colors",
+                                                form.engine_type === eng
+                                                    ? "bg-primary text-primary-foreground"
+                                                    : "bg-transparent text-muted-foreground hover:bg-accent"
+                                            )}
+                                        >
+                                            {eng === "vllm" ? "vLLM" : "SGLang"}
+                                        </button>
+                                    ))}
+                                </div>
+                                {imagesForEngine.length > 0 && (
+                                    <select
+                                        className="flex-1 rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                                        value={form.docker_image ?? ""}
+                                        onChange={(e) => setForm(prev => ({ ...prev, docker_image: e.target.value || null }))}
+                                    >
+                                        <option value="">Default (node CLI config)</option>
+                                        {imagesForEngine.map((img) => (
+                                            <option key={img.id} value={img.image}>
+                                                {img.image}{img.description ? ` — ${img.description}` : ""}
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
+                            </div>
+                            {imagesForEngine.length === 0 && (
+                                <p className="text-[10px] text-muted-foreground/70">
+                                    No registered images for {form.engine_type === "vllm" ? "vLLM" : "SGLang"}. Will use node default config.
+                                    Register images in the Images page.
                                 </p>
                             )}
                         </div>

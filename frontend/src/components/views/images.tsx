@@ -187,22 +187,22 @@ export function ImagesView({ token }: ImagesViewProps) {
         <Table>
           <TableHeader>
             <TableRow className="bg-muted hover:bg-muted border-b border-border">
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">
+              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase pl-6 pr-4 py-4">
                 ID
               </TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">
+              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
                 Engine
               </TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">
+              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
                 Image
               </TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">
+              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
                 Policy
               </TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">
+              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
                 Node Status
               </TableHead>
-              <TableHead className="text-right text-[11px] font-bold text-muted-foreground uppercase py-4">
+              <TableHead className="text-right text-[11px] font-bold text-muted-foreground uppercase pl-4 pr-6 py-4">
                 Actions
               </TableHead>
             </TableRow>
@@ -228,7 +228,7 @@ export function ImagesView({ token }: ImagesViewProps) {
 
                 return (
                   <TableRow key={img.id} className="group">
-                    <TableCell className="py-4">
+                    <TableCell className="pl-6 py-4">
                       <button
                         onClick={() =>
                           setExpandedImage(isExpanded ? null : img.id)
@@ -322,7 +322,7 @@ export function ImagesView({ token }: ImagesViewProps) {
                         </div>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right pr-6">
                       <div className="flex justify-end gap-1">
                         <Button
                           variant="ghost"
