@@ -1377,6 +1377,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "futures-util",
  "nebula-common",
  "reqwest",
  "serde",
@@ -1409,6 +1410,7 @@ dependencies = [
  "anyhow",
  "axum",
  "bytes",
+ "chrono",
  "clap",
  "futures-core",
  "futures-util",

@@ -13,6 +13,7 @@ import { NodesView } from '@/components/views/nodes'
 import { SettingsView } from '@/components/views/settings'
 import { InferenceView } from '@/components/views/inference'
 import { EndpointsView } from '@/components/views/endpoints'
+import { AuditView } from '@/components/views/audit'
 
 const EMPTY_OVERVIEW: ClusterStatus = {
   nodes: [],
@@ -21,7 +22,7 @@ const EMPTY_OVERVIEW: ClusterStatus = {
   model_requests: [],
 }
 
-type Page = 'dashboard' | 'models' | 'nodes' | 'settings' | 'inference' | 'endpoints'
+type Page = 'dashboard' | 'models' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit'
 
 const statusVariant = (s: string): 'default' | 'outline' | 'secondary' | 'destructive' => {
   const n = s.toLowerCase()
@@ -222,6 +223,9 @@ function App() {
         )}
         {page === 'endpoints' && (
           <EndpointsView overview={overview} pct={pct} engineStats={engineStats} />
+        )}
+        {page === 'audit' && (
+          <AuditView token={token} />
         )}
       </main>
     </div>

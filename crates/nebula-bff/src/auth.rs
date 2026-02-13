@@ -50,7 +50,8 @@ pub async fn auth_middleware(
 
     let token = auth_header.strip_prefix("Bearer ").unwrap_or("").trim();
 
-    let ctx = if token.is_empty() && st.auth.is_empty() {
+    let ctx = if st.auth.is_empty() {
+        // No BFF tokens configured — allow all requests as admin.
         Some(AuthContext {
             principal: "anonymous".to_string(),
             role: Role::Admin,

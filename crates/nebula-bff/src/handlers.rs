@@ -627,3 +627,21 @@ async fn unload_model_inner(st: AppState, id: String) -> Response {
 
     (StatusCode::OK, Json(json!({"status": "unloading_triggered"}))).into_response()
 }
+
+pub async fn audit_logs(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    req: axum::extract::Request,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Admin) {
+        return resp;
+    }
+    // Proxy to xtrace traces endpoint, injecting tags[]=audit filter.
+    let existing_query = req.uri().query().unwrap_or("");
+    let query = if existing_query.is_empty() {
+        "tags%5B%5D=audit".to_string()
+    } else {
+        format!("{existing_query}&tags%5B%5D=audit")
+    };
+    xtrace_proxy_get(&st, "/api/public/traces", Some(&query)).await
+}

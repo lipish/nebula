@@ -1,6 +1,6 @@
 import {
     LayoutDashboard, Box, Server, Settings, HelpCircle, MessageSquare,
-    MoreHorizontal, ChevronRight, Diamond, Activity, Cpu
+    MoreHorizontal, ChevronRight, Diamond, Activity, Cpu, Shield
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +16,7 @@ const menuItems = [
     { id: 'nodes', icon: Server, label: "Nodes & GPUs" },
     { id: 'inference', icon: Activity, label: "Inference" },
     { id: 'endpoints', icon: Cpu, label: "Endpoints" },
+    { id: 'audit', icon: Shield, label: "Audit Logs" },
     { icon: MoreHorizontal, label: "More", hasArrow: true },
 ];
 
@@ -75,7 +76,7 @@ const Sidebar = ({ page, setPage, clusterHealthy }: SidebarProps) => {
             </nav>
 
             <div className="px-5 pb-5">
-                <p className="text-xs text-muted-foreground">Nebula · v0.1.0</p>
+                <p className="text-xs text-muted-foreground">v0.1.0</p>
             </div>
         </aside>
     );

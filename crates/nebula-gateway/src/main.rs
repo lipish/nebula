@@ -1,4 +1,5 @@
 mod args;
+mod audit;
 mod auth;
 mod engine;
 mod handlers;
@@ -12,17 +13,19 @@ use std::time::Duration;
 
 use axum::{
     middleware,
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
 use clap::Parser;
 
 use crate::args::Args;
+use crate::audit::AuditWriter;
 use crate::auth::parse_auth_from_env;
 use crate::engine::{EngineClient, OpenAIEngineClient};
 use crate::handlers::{
-    admin_cluster_status, admin_delete_request, admin_list_requests, admin_load_model, admin_logs,
-    admin_whoami, create_responses, healthz, list_models, not_implemented, proxy_post,
+    admin_audit_logs, admin_cluster_status, admin_delete_request, admin_drain_endpoint,
+    admin_list_requests, admin_load_model, admin_logs, admin_scale_request, admin_whoami,
+    create_responses, healthz, list_models, not_implemented, proxy_post,
 };
 use crate::metrics::{metrics_handler, track_requests};
 use crate::state::AppState;
@@ -75,6 +78,8 @@ async fn main() {
 
     let metrics = Arc::new(metrics::Metrics::default());
 
+    let audit = AuditWriter::spawn(args.xtrace_url.as_deref(), args.xtrace_token.as_deref());
+
     let st = AppState {
         _noop: Arc::new(()),
         engine,
@@ -84,6 +89,9 @@ async fn main() {
         auth,
         metrics,
         log_path: args.log_path,
+        audit,
+        xtrace_url: args.xtrace_url.clone(),
+        xtrace_token: args.xtrace_token.clone(),
     };
 
     let admin_routes = Router::new()
@@ -97,6 +105,9 @@ async fn main() {
         .route("/whoami", get(admin_whoami))
         .route("/metrics", get(metrics::admin_metrics))
         .route("/logs", get(admin_logs))
+        .route("/models/requests/:id/scale", put(admin_scale_request))
+        .route("/endpoints/drain", post(admin_drain_endpoint))
+        .route("/audit-logs", get(admin_audit_logs))
         .with_state(st.clone());
 
     let app = Router::new()
@@ -110,6 +121,7 @@ async fn main() {
         .route("/v1/models", get(list_models))
         .nest("/v1/admin", admin_routes)
         // Global middleware
+        .layer(middleware::from_fn_with_state(st.clone(), audit::audit_middleware))
         .layer(middleware::from_fn_with_state(st.clone(), auth::admin_auth))
         .layer(middleware::from_fn_with_state(st.clone(), track_requests))
         .with_state(st);

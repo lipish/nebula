@@ -516,3 +516,220 @@ pub async fn admin_load_model(
     });
     (StatusCode::OK, Json(body)).into_response()
 }
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ScaleRequest {
+    pub replicas: u32,
+}
+
+pub async fn admin_scale_request(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(id): Path<String>,
+    Json(body): Json<ScaleRequest>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&st.metrics, &ctx, Role::Operator) {
+        return resp;
+    }
+    let key = format!("/model_requests/{}", id);
+
+    let (data, _) = match st.store.get(&key).await {
+        Ok(Some(kv)) => kv,
+        Ok(None) => return (StatusCode::NOT_FOUND, "request not found").into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("etcd error: {}", e),
+            )
+                .into_response();
+        }
+    };
+
+    let mut req: ModelRequest = match serde_json::from_slice(&data) {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("deserialization error: {}", e),
+            )
+                .into_response();
+        }
+    };
+
+    let old = req.request.replicas;
+    req.request.replicas = body.replicas;
+    let val = match serde_json::to_vec(&req) {
+        Ok(val) => val,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("serialization error: {}", e),
+            )
+                .into_response();
+        }
+    };
+    if let Err(e) = st.store.put(&key, val, None).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("etcd error: {}", e),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "request_id": id,
+            "old_replicas": old,
+            "new_replicas": body.replicas,
+        })),
+    )
+        .into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct DrainRequest {
+    pub model_uid: String,
+    pub replica_id: u32,
+}
+
+pub async fn admin_drain_endpoint(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    Json(body): Json<DrainRequest>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&st.metrics, &ctx, Role::Operator) {
+        return resp;
+    }
+    let key = format!("/endpoints/{}/{}", body.model_uid, body.replica_id);
+
+    let (data, _) = match st.store.get(&key).await {
+        Ok(Some(kv)) => kv,
+        Ok(None) => return (StatusCode::NOT_FOUND, "endpoint not found").into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("etcd error: {}", e),
+            )
+                .into_response();
+        }
+    };
+
+    let mut ep: EndpointInfo = match serde_json::from_slice(&data) {
+        Ok(ep) => ep,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("deserialization error: {}", e),
+            )
+                .into_response();
+        }
+    };
+
+    use nebula_common::EndpointStatus;
+    if ep.status == EndpointStatus::Draining {
+        return (
+            StatusCode::OK,
+            Json(json!({"status": "already_draining"})),
+        )
+            .into_response();
+    }
+
+    ep.status = EndpointStatus::Draining;
+    let val = match serde_json::to_vec(&ep) {
+        Ok(val) => val,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("serialization error: {}", e),
+            )
+                .into_response();
+        }
+    };
+    if let Err(e) = st.store.put(&key, val, None).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("etcd error: {}", e),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "model_uid": body.model_uid,
+            "replica_id": body.replica_id,
+            "status": "draining",
+        })),
+    )
+        .into_response()
+}
+
+pub async fn admin_audit_logs(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    axum::extract::Query(query): axum::extract::Query<crate::audit::AuditLogQuery>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&st.metrics, &ctx, Role::Admin) {
+        return resp;
+    }
+
+    let (xtrace_url, xtrace_token) = match (&st.xtrace_url, &st.xtrace_token) {
+        (Some(u), Some(t)) => (u.clone(), t.clone()),
+        _ => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error": "audit logging not configured (xtrace not set)"})),
+            )
+                .into_response();
+        }
+    };
+
+    let mut params = vec![("tags[]", "audit".to_string())];
+    if let Some(p) = query.page {
+        params.push(("page", p.to_string()));
+    }
+    params.push(("limit", query.limit.unwrap_or(50).min(200).to_string()));
+    if let Some(u) = &query.user_id {
+        params.push(("userId", u.clone()));
+    }
+    if let Some(f) = &query.from {
+        params.push(("fromTimestamp", f.clone()));
+    }
+    if let Some(t) = &query.to {
+        params.push(("toTimestamp", t.clone()));
+    }
+
+    let base = xtrace_url.trim_end_matches('/');
+    let qs = params
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join("&");
+    let url = format!("{base}/api/public/traces?{qs}");
+
+    let resp = match st.http.get(&url).bearer_auth(&xtrace_token).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": format!("xtrace request failed: {}", e)})),
+            )
+                .into_response();
+        }
+    };
+
+    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let body: serde_json::Value = match resp.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": format!("xtrace parse error: {}", e)})),
+            )
+                .into_response();
+        }
+    };
+
+    (status, Json(body)).into_response()
+}

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use nebula_meta::EtcdMetaStore;
 
+use crate::audit::AuditWriter;
 use crate::auth::AuthState;
 use crate::engine::EngineClient;
 use crate::metrics::Metrics;
@@ -16,4 +17,7 @@ pub struct AppState {
     pub auth: AuthState,
     pub metrics: Arc<Metrics>,
     pub log_path: String,
+    pub audit: Option<Arc<AuditWriter>>,
+    pub xtrace_url: Option<String>,
+    pub xtrace_token: Option<String>,
 }
