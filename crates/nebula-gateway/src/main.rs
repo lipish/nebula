@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use axum::{
     middleware,
-    routing::{get, post, put},
+    routing::{any, get, post, put},
     Router,
 };
 use clap::Parser;
@@ -27,7 +27,7 @@ use crate::handlers::{
     admin_drain_endpoint, admin_get_image, admin_list_image_status, admin_list_images,
     admin_list_requests, admin_load_model, admin_logs, admin_logs_stream, admin_put_image,
     admin_scale_request, admin_whoami, create_responses, healthz, list_models, not_implemented,
-    proxy_post,
+    proxy_post, proxy_v2,
 };
 use crate::metrics::{metrics_handler, track_requests};
 use crate::state::AppState;
@@ -95,6 +95,7 @@ async fn main() {
         audit,
         xtrace_url: args.xtrace_url.clone(),
         xtrace_token: args.xtrace_token.clone(),
+        bff_url: args.bff_url,
     };
 
     let admin_routes = Router::new()
@@ -132,6 +133,7 @@ async fn main() {
         .route("/v1/embeddings", post(proxy_post))
         .route("/v1/rerank", post(proxy_post))
         .route("/v1/models", get(list_models))
+        .route("/v1/admin/v2/{*rest}", any(proxy_v2))
         .nest("/v1/admin", admin_routes)
         // Global middleware
         .layer(middleware::from_fn_with_state(st.clone(), audit::audit_middleware))

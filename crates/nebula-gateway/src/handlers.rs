@@ -227,6 +227,64 @@ pub async fn proxy_post(
     out
 }
 
+pub async fn proxy_v2(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    req: Request<Body>,
+) -> Response {
+    let bff_base = st.bff_url.trim_end_matches('/');
+    let uri_path = req.uri().path().to_string();
+    let rest = uri_path
+        .strip_prefix("/v1/admin/v2")
+        .unwrap_or(&uri_path);
+    let uri_query = req
+        .uri()
+        .query()
+        .map(|q| format!("?{q}"))
+        .unwrap_or_default();
+    let url = format!("{bff_base}/api/v2{rest}{uri_query}");
+    let method = req.method().clone();
+
+    let body_bytes = match axum::body::to_bytes(req.into_body(), usize::MAX).await {
+        Ok(b) => b,
+        Err(_) => return (StatusCode::BAD_REQUEST, "invalid body").into_response(),
+    };
+
+    let reqwest_method =
+        reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET);
+
+    let resp = match st
+        .http
+        .request(reqwest_method, &url)
+        .headers(to_reqwest_headers(&headers))
+        .body(body_bytes)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error=%e, url=%url, "bff proxy request failed");
+            return (StatusCode::BAD_GATEWAY, "bff proxy request failed").into_response();
+        }
+    };
+
+    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let resp_headers = resp.headers().clone();
+    let bytes = match resp.bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::warn!(error=%e, "failed to read bff response body");
+            Bytes::new()
+        }
+    };
+    let mut out = Response::builder()
+        .status(status)
+        .body(Body::from(bytes))
+        .unwrap_or_else(|_| Response::new(Body::empty()));
+    append_headers(&resp_headers, &mut out);
+    out
+}
+
 pub async fn admin_cluster_status(
     State(st): State<AppState>,
     Extension(ctx): Extension<AuthContext>,

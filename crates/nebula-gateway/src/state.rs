@@ -20,6 +20,7 @@ pub struct AppState {
     pub audit: Option<Arc<AuditWriter>>,
     pub xtrace_url: Option<String>,
     pub xtrace_token: Option<String>,
+    pub bff_url: String,
 }
 
 impl AsRef<AuthConfig> for AppState {

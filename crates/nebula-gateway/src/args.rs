@@ -29,4 +29,8 @@ pub struct Args {
     /// Log output format: "text" (human-readable, default) or "json" (structured).
     #[arg(long, env = "NEBULA_LOG_FORMAT", default_value = "text")]
     pub log_format: String,
+
+    /// BFF service URL for v2 API proxy.
+    #[arg(long, env = "NEBULA_BFF_URL", default_value = "http://127.0.0.1:18090")]
+    pub bff_url: String,
 }
