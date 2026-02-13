@@ -1,6 +1,7 @@
 mod args;
 mod auth;
 mod handlers;
+mod handlers_v2;
 mod state;
 
 use std::sync::Arc;
@@ -8,7 +9,7 @@ use std::time::Duration;
 
 use axum::{
     middleware,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use clap::Parser;
@@ -76,11 +77,30 @@ async fn main() -> anyhow::Result<()> {
         .layer(middleware::from_fn_with_state(st.clone(), nebula_common::auth::auth_middleware::<AppState>))
         .with_state(st.clone());
 
+    let v2_routes = Router::new()
+        .route("/models", get(handlers_v2::list_models).post(handlers_v2::create_model))
+        .route("/models/:model_uid", get(handlers_v2::get_model).put(handlers_v2::update_model).delete(handlers_v2::delete_model))
+        .route("/models/:model_uid/start", post(handlers_v2::start_model))
+        .route("/models/:model_uid/stop", post(handlers_v2::stop_model))
+        .route("/models/:model_uid/scale", put(handlers_v2::scale_model))
+        .route("/models/:model_uid/save-as-template", post(handlers_v2::save_as_template))
+        .route("/templates", get(handlers_v2::list_templates).post(handlers_v2::create_template))
+        .route("/templates/:id", get(handlers_v2::get_template).put(handlers_v2::update_template).delete(handlers_v2::delete_template))
+        .route("/templates/:id/deploy", post(handlers_v2::deploy_template))
+        .route("/nodes/:node_id/cache", get(handlers_v2::node_cache))
+        .route("/nodes/:node_id/disk", get(handlers_v2::node_disk))
+        .route("/cache/summary", get(handlers_v2::cache_summary))
+        .route("/alerts", get(handlers_v2::list_alerts))
+        .layer(middleware::from_fn_with_state(st.clone(), nebula_common::auth::auth_middleware::<AppState>))
+        .with_state(st.clone());
+
     let api_routes = Router::new()
         .route("/healthz", get(healthz))
         .merge(protected_routes);
 
-    let app = Router::new().nest("/api", api_routes);
+    let app = Router::new()
+        .nest("/api", api_routes)
+        .nest("/api/v2", v2_routes);
 
     let listener = tokio::net::TcpListener::bind(&args.listen_addr).await?;
     axum::serve(listener, app).await?;
