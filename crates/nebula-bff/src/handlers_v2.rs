@@ -13,8 +13,8 @@ use crate::auth::{require_role, AuthContext, Role};
 use crate::state::AppState;
 use nebula_common::{
     DesiredState, DiskAlert, DownloadPhase, DownloadProgress, EndpointInfo, EndpointStats,
-    ModelCacheEntry, ModelConfig, ModelDeployment, ModelSource, ModelSpec, ModelTemplate,
-    NodeDiskStatus, PlacementPlan, TemplateCategory, TemplateSource,
+    ModelCacheEntry, ModelConfig, ModelDeployment, ModelRequest, ModelRequestStatus, ModelSource,
+    ModelSpec, ModelTemplate, NodeDiskStatus, PlacementPlan, TemplateCategory, TemplateSource,
 };
 use nebula_meta::MetaStore;
 
@@ -1620,4 +1620,213 @@ pub async fn list_alerts(
         .collect();
 
     (StatusCode::OK, Json(alerts)).into_response()
+}
+
+// ===========================================================================
+// V1 → V2 Migration
+// ===========================================================================
+
+#[derive(Serialize)]
+struct MigrationDetail {
+    model_uid: String,
+    action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    desired_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MigrationResult {
+    total: usize,
+    migrated: usize,
+    skipped: usize,
+    failed: usize,
+    details: Vec<MigrationDetail>,
+}
+
+pub async fn migrate_v1_to_v2(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Admin) {
+        return resp;
+    }
+
+    // 1. List all existing model_requests
+    let requests_raw = match st.store.list_prefix("/model_requests/").await {
+        Ok(r) => r,
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "etcd_error",
+                &format!("failed to list model_requests: {e}"),
+            );
+        }
+    };
+
+    let model_requests: Vec<ModelRequest> = requests_raw
+        .into_iter()
+        .filter_map(|(_, v, _)| serde_json::from_slice(&v).ok())
+        .collect();
+
+    let total = model_requests.len();
+    let mut migrated = 0usize;
+    let mut skipped = 0usize;
+    let mut failed = 0usize;
+    let mut details = Vec::new();
+
+    for mr in &model_requests {
+        let model_uid = &mr.request.model_uid;
+
+        // 2a. Check if already migrated (idempotency)
+        match st.store.get(&format!("/models/{model_uid}/spec")).await {
+            Ok(Some(_)) => {
+                skipped += 1;
+                details.push(MigrationDetail {
+                    model_uid: model_uid.clone(),
+                    action: "skipped".to_string(),
+                    desired_state: None,
+                    reason: Some("already_exists".to_string()),
+                });
+                continue;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                failed += 1;
+                details.push(MigrationDetail {
+                    model_uid: model_uid.clone(),
+                    action: "failed".to_string(),
+                    desired_state: None,
+                    reason: Some(format!("etcd get error: {e}")),
+                });
+                continue;
+            }
+        }
+
+        let now = now_ms();
+
+        // 2b. Build ModelSpec from ModelLoadRequest
+        let spec = ModelSpec {
+            model_uid: model_uid.clone(),
+            model_name: mr.request.model_name.clone(),
+            model_source: ModelSource::HuggingFace,
+            model_path: None,
+            engine_type: mr.request.engine_type.clone(),
+            docker_image: mr.request.docker_image.clone(),
+            config: mr.request.config.clone(),
+            labels: HashMap::new(),
+            created_at_ms: mr.created_at_ms,
+            updated_at_ms: now,
+            created_by: Some("migration".to_string()),
+        };
+
+        // 2c. Write ModelSpec
+        let spec_val = match serde_json::to_vec(&spec) {
+            Ok(v) => v,
+            Err(e) => {
+                failed += 1;
+                details.push(MigrationDetail {
+                    model_uid: model_uid.clone(),
+                    action: "failed".to_string(),
+                    desired_state: None,
+                    reason: Some(format!("spec serialization error: {e}")),
+                });
+                continue;
+            }
+        };
+
+        if let Err(e) = st
+            .store
+            .put(&format!("/models/{model_uid}/spec"), spec_val, None)
+            .await
+        {
+            failed += 1;
+            details.push(MigrationDetail {
+                model_uid: model_uid.clone(),
+                action: "failed".to_string(),
+                desired_state: None,
+                reason: Some(format!("spec write error: {e}")),
+            });
+            continue;
+        }
+
+        // 2d. Build ModelDeployment
+        let desired_state = match &mr.status {
+            ModelRequestStatus::Running | ModelRequestStatus::Scheduled => DesiredState::Running,
+            _ => DesiredState::Stopped,
+        };
+
+        let gpu_affinity = mr
+            .request
+            .gpu_indices
+            .clone()
+            .or_else(|| mr.request.gpu_index.map(|idx| vec![idx]));
+
+        let deployment = ModelDeployment {
+            model_uid: model_uid.clone(),
+            desired_state: desired_state.clone(),
+            replicas: mr.request.replicas,
+            min_replicas: mr.request.min_replicas,
+            max_replicas: mr.request.max_replicas,
+            node_affinity: mr.request.node_id.clone(),
+            gpu_affinity,
+            config_overrides: mr.request.config.clone(),
+            version: 1,
+            updated_at_ms: now,
+        };
+
+        // 2e. Write ModelDeployment
+        let dep_val = match serde_json::to_vec(&deployment) {
+            Ok(v) => v,
+            Err(e) => {
+                failed += 1;
+                details.push(MigrationDetail {
+                    model_uid: model_uid.clone(),
+                    action: "failed".to_string(),
+                    desired_state: None,
+                    reason: Some(format!("deployment serialization error: {e}")),
+                });
+                continue;
+            }
+        };
+
+        if let Err(e) = st
+            .store
+            .put(&format!("/deployments/{model_uid}"), dep_val, None)
+            .await
+        {
+            failed += 1;
+            details.push(MigrationDetail {
+                model_uid: model_uid.clone(),
+                action: "failed".to_string(),
+                desired_state: None,
+                reason: Some(format!("deployment write error: {e}")),
+            });
+            continue;
+        }
+
+        let ds_str = match desired_state {
+            DesiredState::Running => "running",
+            DesiredState::Stopped => "stopped",
+        };
+
+        migrated += 1;
+        details.push(MigrationDetail {
+            model_uid: model_uid.clone(),
+            action: "migrated".to_string(),
+            desired_state: Some(ds_str.to_string()),
+            reason: None,
+        });
+    }
+
+    let result = MigrationResult {
+        total,
+        migrated,
+        skipped,
+        failed,
+        details,
+    };
+
+    (StatusCode::OK, Json(result)).into_response()
 }

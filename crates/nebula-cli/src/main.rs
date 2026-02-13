@@ -12,7 +12,8 @@ use reqwest::Client;
 use nebula_common::{ClusterStatus, ModelLoadRequest};
 
 use crate::args::{
-    Args, CacheCommand, ClusterCommand, Command, DiskCommand, ModelCommand, TemplateCommand,
+    AdminCommand, Args, CacheCommand, ClusterCommand, Command, DiskCommand, ModelCommand,
+    TemplateCommand,
 };
 use crate::client::auth;
 use crate::config::build_config;
@@ -444,6 +445,47 @@ async fn main() -> Result<()> {
                 eprintln!("✗ Failed to drain: {}", resp.text().await?);
             }
         }
+        Command::Admin { subcommand } => match subcommand {
+            AdminCommand::Migrate => {
+                let url = v2_url(&args.gateway_url, "/migrate");
+                let resp = auth(client.post(&url), token.as_ref()).send().await?;
+                if resp.status().is_success() {
+                    let result: serde_json::Value = resp.json().await?;
+                    let migrated = result["migrated"].as_u64().unwrap_or(0);
+                    let skipped = result["skipped"].as_u64().unwrap_or(0);
+                    let failed = result["failed"].as_u64().unwrap_or(0);
+                    println!(
+                        "Migration complete: {} migrated, {} skipped, {} failed",
+                        migrated, skipped, failed
+                    );
+                    if let Some(details) = result["details"].as_array() {
+                        for d in details {
+                            let uid = d["model_uid"].as_str().unwrap_or("?");
+                            let action = d["action"].as_str().unwrap_or("?");
+                            match action {
+                                "migrated" => {
+                                    let ds = d["desired_state"].as_str().unwrap_or("?");
+                                    println!("  ✓ {} → {}", uid, ds);
+                                }
+                                "skipped" => {
+                                    let reason = d["reason"].as_str().unwrap_or("unknown");
+                                    println!("  ○ {} → skipped ({})", uid, reason);
+                                }
+                                "failed" => {
+                                    let reason = d["reason"].as_str().unwrap_or("unknown");
+                                    println!("  ✗ {} → failed ({})", uid, reason);
+                                }
+                                _ => {
+                                    println!("  ? {} → {}", uid, action);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    eprintln!("✗ Migration failed: {}", resp.text().await?);
+                }
+            }
+        },
     }
 
     Ok(())

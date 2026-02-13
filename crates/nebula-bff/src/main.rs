@@ -91,6 +91,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/nodes/:node_id/disk", get(handlers_v2::node_disk))
         .route("/cache/summary", get(handlers_v2::cache_summary))
         .route("/alerts", get(handlers_v2::list_alerts))
+        .route("/migrate", post(handlers_v2::migrate_v1_to_v2))
         .layer(middleware::from_fn_with_state(st.clone(), nebula_common::auth::auth_middleware::<AppState>))
         .with_state(st.clone());
 

@@ -93,6 +93,11 @@ pub enum Command {
         #[arg(long)]
         replica_id: u32,
     },
+    /// Admin operations
+    Admin {
+        #[command(subcommand)]
+        subcommand: AdminCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -250,4 +255,11 @@ pub enum CacheCommand {
 pub enum DiskCommand {
     /// Show disk status
     Status,
+}
+
+
+#[derive(Debug, Subcommand)]
+pub enum AdminCommand {
+    /// Migrate v1 model_requests to v2 ModelSpec + ModelDeployment
+    Migrate,
 }
