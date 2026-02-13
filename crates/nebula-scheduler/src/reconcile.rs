@@ -35,20 +35,20 @@ const SCALE_DOWN_COOLDOWN_MS: u64 = 300_000; // 5 minutes
 /// For each model with a PlacementPlan:
 ///   1. Check endpoint health — remove stale assignments whose endpoints timed out.
 ///   2. Check replica count — if fewer healthy replicas than desired, try to add new ones.
-pub async fn reconcile_loop(store: EtcdMetaStore, default_port: u16) {
+pub async fn reconcile_loop(store: EtcdMetaStore, default_port: u16, xtrace: Option<xtrace_client::Client>) {
     // Wait a bit before first reconcile to let the system stabilize.
     tokio::time::sleep(Duration::from_secs(10)).await;
     info!("reconcile loop started (interval={}s)", RECONCILE_INTERVAL.as_secs());
 
     loop {
-        if let Err(e) = reconcile_once(&store, default_port).await {
+        if let Err(e) = reconcile_once(&store, default_port, xtrace.as_ref()).await {
             warn!(error=%e, "reconcile cycle failed");
         }
         tokio::time::sleep(RECONCILE_INTERVAL).await;
     }
 }
 
-async fn reconcile_once(store: &EtcdMetaStore, default_port: u16) -> anyhow::Result<()> {
+async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option<&xtrace_client::Client>) -> anyhow::Result<()> {
     let now = now_ms();
 
     // 1. Load all placements
@@ -86,17 +86,8 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16) -> anyhow::Res
         }
     }
 
-    // 4. Load all stats (for autoscaling decisions)
-    let stats_kvs = store.list_prefix("/stats/").await?;
-    let mut stats_by_model: HashMap<String, Vec<EndpointStats>> = HashMap::new();
-    for (_, val, _) in &stats_kvs {
-        if let Ok(s) = serde_json::from_slice::<EndpointStats>(val) {
-            stats_by_model
-                .entry(s.model_uid.clone())
-                .or_default()
-                .push(s);
-        }
-    }
+    // 4. Load stats from xtrace (for autoscaling decisions)
+    let stats_by_model = fetch_stats_from_xtrace(xtrace).await;
 
     // 5. For each placement, reconcile
     for plan in &plans {
@@ -169,8 +160,7 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16) -> anyhow::Res
             let ep_key = format!("/endpoints/{}/{}", plan.model_uid, replica_id);
             let _ = store.delete(&ep_key).await;
 
-            let stats_key = format!("/stats/{}/{}", plan.model_uid, replica_id);
-            let _ = store.delete(&stats_key).await;
+            // Stats are now in xtrace, no etcd key to clean up.
         }
 
         let need_update = !stale_replica_ids.is_empty()

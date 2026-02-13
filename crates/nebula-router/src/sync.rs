@@ -179,6 +179,17 @@ pub async fn stats_sync_loop(
             let pending = pending_map.get(&key).copied().unwrap_or(0);
             let kv_usage = kv_usage_map.get(&key).copied();
 
+            // Convert kv_cache_usage ratio (0..1) to synthetic used/free bytes
+            // so downstream Router logic can compute the ratio the same way.
+            const VIRTUAL_TOTAL: u64 = 1_000_000;
+            let (kv_used, kv_free) = match kv_usage {
+                Some(usage) => {
+                    let used = (usage * VIRTUAL_TOTAL as f64) as u64;
+                    (Some(used), Some(VIRTUAL_TOTAL - used))
+                }
+                None => (None, None),
+            };
+
             let stats = EndpointStats {
                 model_uid: key.0,
                 replica_id: key.1,
@@ -186,32 +197,8 @@ pub async fn stats_sync_loop(
                 pending_requests: pending,
                 prefix_cache_hit_rate: None,
                 prompt_cache_hit_rate: None,
-                kv_cache_used_bytes: None,
-                kv_cache_free_bytes: if kv_usage.is_some() {
-                    // Store kv_cache_usage (0..1) as synthetic used/free so Router
-                    // can compute the ratio the same way.  Use 1_000_000 as virtual total.
-                    let usage = kv_usage.unwrap();
-                    let total: u64 = 1_000_000;
-                    let used = (usage * total as f64) as u64;
-                    // Overwrite both fields
-                    // (we'll set kv_cache_used_bytes right after this block)
-                    Some(total - used)
-                } else {
-                    None
-                },
-            };
-
-            // Patch kv_cache_used_bytes if we have usage
-            let stats = if let Some(usage) = kv_usage {
-                let total: u64 = 1_000_000;
-                let used = (usage * total as f64) as u64;
-                EndpointStats {
-                    kv_cache_used_bytes: Some(used),
-                    kv_cache_free_bytes: Some(total - used),
-                    ..stats
-                }
-            } else {
-                stats
+                kv_cache_used_bytes: kv_used,
+                kv_cache_free_bytes: kv_free,
             };
 
             router.upsert_stats(stats);
