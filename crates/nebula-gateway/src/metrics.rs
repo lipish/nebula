@@ -26,23 +26,73 @@ pub struct Metrics {
 }
 
 pub fn render_metrics(metrics: &Metrics) -> String {
-    format!(
-        "nebula_gateway_requests_total {}\nnebula_gateway_requests_inflight {}\nnebula_gateway_responses_2xx {}\nnebula_gateway_responses_4xx {}\nnebula_gateway_responses_5xx {}\nnebula_gateway_auth_missing {}\nnebula_gateway_auth_invalid {}\nnebula_gateway_auth_forbidden {}\nnebula_gateway_auth_rate_limited {}\n",
+    let mut body = String::new();
+
+    body.push_str(&format!(
+        "# HELP nebula_gateway_requests_total Total requests handled by gateway.\n\
+         # TYPE nebula_gateway_requests_total counter\n\
+         nebula_gateway_requests_total {}\n",
         metrics.requests_total.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_gateway_requests_inflight Currently in-flight requests.\n\
+         # TYPE nebula_gateway_requests_inflight gauge\n\
+         nebula_gateway_requests_inflight {}\n",
         metrics.requests_inflight.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_gateway_responses_2xx Total 2xx responses.\n\
+         # TYPE nebula_gateway_responses_2xx counter\n\
+         nebula_gateway_responses_2xx {}\n",
         metrics.status_2xx.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_gateway_responses_4xx Total 4xx responses.\n\
+         # TYPE nebula_gateway_responses_4xx counter\n\
+         nebula_gateway_responses_4xx {}\n",
         metrics.status_4xx.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_gateway_responses_5xx Total 5xx responses.\n\
+         # TYPE nebula_gateway_responses_5xx counter\n\
+         nebula_gateway_responses_5xx {}\n",
         metrics.status_5xx.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_gateway_auth_missing Requests with missing auth credentials.\n\
+         # TYPE nebula_gateway_auth_missing counter\n\
+         nebula_gateway_auth_missing {}\n",
         metrics.auth_missing.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_gateway_auth_invalid Requests with invalid auth credentials.\n\
+         # TYPE nebula_gateway_auth_invalid counter\n\
+         nebula_gateway_auth_invalid {}\n",
         metrics.auth_invalid.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_gateway_auth_forbidden Requests denied due to insufficient permissions.\n\
+         # TYPE nebula_gateway_auth_forbidden counter\n\
+         nebula_gateway_auth_forbidden {}\n",
         metrics.auth_forbidden.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_gateway_auth_rate_limited Requests rejected due to rate limiting.\n\
+         # TYPE nebula_gateway_auth_rate_limited counter\n\
+         nebula_gateway_auth_rate_limited {}\n",
         metrics.auth_rate_limited.load(Ordering::Relaxed),
-    )
+    ));
+
+    body
 }
 
 pub async fn metrics_handler(State(st): State<AppState>) -> impl IntoResponse {
     let body = render_metrics(&st.metrics);
-    (axum::http::StatusCode::OK, body)
+    (
+        axum::http::StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        body,
+    )
 }
 
 pub async fn admin_metrics(
@@ -53,7 +103,12 @@ pub async fn admin_metrics(
         return resp;
     }
     let body = render_metrics(&st.metrics);
-    (axum::http::StatusCode::OK, body).into_response()
+    (
+        axum::http::StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        body,
+    )
+        .into_response()
 }
 
 pub async fn track_requests(
