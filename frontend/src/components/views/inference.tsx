@@ -42,11 +42,19 @@ function parseGatewayMetrics(raw: string): GatewayMetrics {
     const [key, val] = parts;
     const n = parseInt(val, 10);
     if (isNaN(n)) continue;
+    // gateway prefix — always authoritative
     if (key === "nebula_gateway_requests_total") m.requests_total = n;
     else if (key === "nebula_gateway_requests_inflight") m.requests_inflight = n;
     else if (key === "nebula_gateway_responses_2xx") m.responses_2xx = n;
     else if (key === "nebula_gateway_responses_4xx") m.responses_4xx = n;
     else if (key === "nebula_gateway_responses_5xx") m.responses_5xx = n;
+    // router prefix — only fills in fields still at 0
+    else if (key === "nebula_router_requests_total" && m.requests_total === 0) m.requests_total = n;
+    else if (key === "nebula_router_requests_inflight" && m.requests_inflight === 0) m.requests_inflight = n;
+    else if (key === "nebula_router_responses_2xx" && m.responses_2xx === 0) m.responses_2xx = n;
+    else if (key === "nebula_router_responses_4xx" && m.responses_4xx === 0) m.responses_4xx = n;
+    else if (key === "nebula_router_responses_5xx" && m.responses_5xx === 0) m.responses_5xx = n;
+    // auth — gateway prefix only
     else if (key === "nebula_gateway_auth_missing") m.auth_missing = n;
     else if (key === "nebula_gateway_auth_invalid") m.auth_invalid = n;
     else if (key === "nebula_gateway_auth_forbidden") m.auth_forbidden = n;
