@@ -17,9 +17,9 @@ use tracing_subscriber::EnvFilter;
 use crate::args::Args;
 use crate::auth::parse_auth_from_env;
 use crate::handlers::{
-    audit_logs, engine_stats, healthz, list_requests, load_model, logs, metrics,
-    observe_metrics_names, observe_metrics_query, observe_trace_detail, observe_traces, overview,
-    search_models, unload_model, whoami,
+    audit_logs, delete_image, engine_stats, get_image, healthz, list_image_status, list_images,
+    list_requests, load_model, logs, metrics, observe_metrics_names, observe_metrics_query,
+    observe_trace_detail, observe_traces, overview, put_image, search_models, unload_model, whoami,
 };
 use crate::state::AppState;
 
@@ -69,6 +69,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/observe/metrics/query", get(observe_metrics_query))
         .route("/observe/metrics/names", get(observe_metrics_names))
         .route("/audit-logs", get(audit_logs))
+        // Image registry
+        .route("/images", get(list_images))
+        .route("/images/status", get(list_image_status))
+        .route("/images/:id", get(get_image).put(put_image).delete(delete_image))
         .layer(middleware::from_fn_with_state(st.clone(), auth::auth_middleware))
         .with_state(st.clone());
 

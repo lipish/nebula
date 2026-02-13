@@ -301,6 +301,105 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
     Ok(())
 }
 
+/// Fetch latest engine stats from xtrace, grouped by model_uid.
+async fn fetch_stats_from_xtrace(
+    xtrace: Option<&xtrace_client::Client>,
+) -> HashMap<String, Vec<EndpointStats>> {
+    let mut stats_by_model: HashMap<String, Vec<EndpointStats>> = HashMap::new();
+
+    let client = match xtrace {
+        Some(c) => c,
+        None => return stats_by_model,
+    };
+
+    let now = chrono::Utc::now();
+    let from = now - chrono::Duration::seconds(120);
+
+    // Collect pending_requests and kv_cache_usage per (model_uid, replica_id)
+    let mut pending_map: HashMap<(String, u32), u64> = HashMap::new();
+    let mut kv_usage_map: HashMap<(String, u32), f64> = HashMap::new();
+
+    for (metric_name, is_pending) in [("pending_requests", true), ("kv_cache_usage", false)] {
+        let q = xtrace_client::MetricsQueryParams {
+            name: metric_name.to_string(),
+            from: Some(from),
+            to: Some(now),
+            step: Some("120s".to_string()),
+            agg: Some("last".to_string()),
+            ..Default::default()
+        };
+
+        match client.query_metrics(&q).await {
+            Ok(resp) => {
+                for series in &resp.data {
+                    let model_uid = series.labels.get("model_uid")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let replica_id: u32 = series.labels.get("replica_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+
+                    if model_uid.is_empty() {
+                        continue;
+                    }
+
+                    if let Some(last) = series.values.last() {
+                        let key = (model_uid, replica_id);
+                        if is_pending {
+                            pending_map.insert(key, last.value as u64);
+                        } else {
+                            kv_usage_map.insert(key, last.value);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(metric=%metric_name, error=%e, "failed to query xtrace metrics for reconcile");
+            }
+        }
+    }
+
+    // Merge into EndpointStats
+    let mut all_keys: std::collections::HashSet<(String, u32)> = std::collections::HashSet::new();
+    all_keys.extend(pending_map.keys().cloned());
+    all_keys.extend(kv_usage_map.keys().cloned());
+
+    let now_ms = now.timestamp_millis() as u64;
+    for key in all_keys {
+        let pending = pending_map.get(&key).copied().unwrap_or(0);
+        let kv_usage = kv_usage_map.get(&key).copied();
+
+        const VIRTUAL_TOTAL: u64 = 1_000_000;
+        let (kv_used, kv_free) = match kv_usage {
+            Some(usage) => {
+                let used = (usage * VIRTUAL_TOTAL as f64) as u64;
+                (Some(used), Some(VIRTUAL_TOTAL - used))
+            }
+            None => (None, None),
+        };
+
+        let stats = EndpointStats {
+            model_uid: key.0.clone(),
+            replica_id: key.1,
+            last_updated_ms: now_ms,
+            pending_requests: pending,
+            prefix_cache_hit_rate: None,
+            prompt_cache_hit_rate: None,
+            kv_cache_used_bytes: kv_used,
+            kv_cache_free_bytes: kv_free,
+        };
+
+        stats_by_model
+            .entry(key.0)
+            .or_default()
+            .push(stats);
+    }
+
+    stats_by_model
+}
+
 /// Compute the desired replica count based on load signals and autoscaling bounds.
 fn compute_desired_replicas(
     base_replicas: u32,

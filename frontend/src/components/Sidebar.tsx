@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
     LayoutDashboard, Box, Server, Settings, HelpCircle, MessageSquare,
-    MoreHorizontal, ChevronRight, ChevronDown, Diamond, Activity, Cpu, Shield
+    MoreHorizontal, ChevronRight, ChevronDown, Diamond, Activity, Cpu, Shield, Container
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +17,7 @@ const menuItems = [
     { id: 'nodes', icon: Server, label: "Nodes & GPUs" },
     { id: 'inference', icon: Activity, label: "Inference" },
     { id: 'endpoints', icon: Cpu, label: "Endpoints" },
+    { id: 'images', icon: Container, label: "Images" },
     {
         icon: MoreHorizontal, label: "More", hasArrow: true,
         children: [

@@ -28,11 +28,26 @@ async fn main() -> Result<()> {
     let store = EtcdMetaStore::connect(std::slice::from_ref(&args.etcd_endpoint)).await?;
     info!("connected to etcd at {}", args.etcd_endpoint);
 
+    // Create xtrace client for stats queries
+    let xtrace = args.xtrace_url.as_deref().and_then(|url| {
+        let token = args.xtrace_token.as_deref().unwrap_or("");
+        match xtrace_client::Client::new(url, token) {
+            Ok(c) => {
+                info!("xtrace client created for stats queries (url={})", url);
+                Some(c)
+            }
+            Err(e) => {
+                warn!(error=%e, "failed to create xtrace client, autoscaling stats disabled");
+                None
+            }
+        }
+    });
+
     // Spawn reconcile loop (health self-healing)
     let store_for_reconcile = store.clone();
     let default_port_for_reconcile = args.default_port;
     tokio::spawn(async move {
-        reconcile::reconcile_loop(store_for_reconcile, default_port_for_reconcile).await;
+        reconcile::reconcile_loop(store_for_reconcile, default_port_for_reconcile, xtrace).await;
     });
 
     // Watch for model requests

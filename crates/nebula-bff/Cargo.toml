@@ -17,5 +17,8 @@ tracing-subscriber.workspace = true
 urlencoding = "2"
 uuid.workspace = true
 
+chrono.workspace = true
+xtrace-client.workspace = true
+
 nebula-meta = { path = "../nebula-meta" }
 nebula-common = { path = "../nebula-common" }

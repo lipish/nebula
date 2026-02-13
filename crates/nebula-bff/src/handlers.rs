@@ -267,22 +267,92 @@ pub async fn engine_stats(
         return resp;
     }
 
-    let stats_raw = match st.store.list_prefix("/stats/").await {
-        Ok(s) => s,
+    let client = match xtrace_client::Client::new(&st.xtrace_url, &st.xtrace_token) {
+        Ok(c) => c,
         Err(e) => {
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "etcd_error",
-                &format!("etcd error: {}", e),
+                "xtrace_error",
+                &format!("failed to create xtrace client: {}", e),
             )
         }
     };
 
-    let mut stats = Vec::new();
-    for (_, v, _) in stats_raw {
-        if let Ok(s) = serde_json::from_slice::<EndpointStats>(&v) {
-            stats.push(s);
+    let now = chrono::Utc::now();
+    let from = now - chrono::Duration::seconds(120);
+
+    let mut pending_map: std::collections::HashMap<(String, u32), u64> = std::collections::HashMap::new();
+    let mut kv_usage_map: std::collections::HashMap<(String, u32), f64> = std::collections::HashMap::new();
+
+    for (metric_name, is_pending) in [("pending_requests", true), ("kv_cache_usage", false)] {
+        let q = xtrace_client::MetricsQueryParams {
+            name: metric_name.to_string(),
+            from: Some(from),
+            to: Some(now),
+            step: Some("120s".to_string()),
+            agg: Some("last".to_string()),
+            ..Default::default()
+        };
+
+        match client.query_metrics(&q).await {
+            Ok(resp) => {
+                for series in &resp.data {
+                    let model_uid = series.labels.get("model_uid")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let replica_id: u32 = series.labels.get("replica_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+
+                    if model_uid.is_empty() {
+                        continue;
+                    }
+
+                    if let Some(last) = series.values.last() {
+                        let key = (model_uid, replica_id);
+                        if is_pending {
+                            pending_map.insert(key, last.value as u64);
+                        } else {
+                            kv_usage_map.insert(key, last.value);
+                        }
+                    }
+                }
+            }
+            Err(_) => {}
         }
+    }
+
+    let mut all_keys: std::collections::HashSet<(String, u32)> = std::collections::HashSet::new();
+    all_keys.extend(pending_map.keys().cloned());
+    all_keys.extend(kv_usage_map.keys().cloned());
+
+    let now_ms = now.timestamp_millis() as u64;
+    let mut stats = Vec::new();
+    for key in all_keys {
+        let pending = pending_map.get(&key).copied().unwrap_or(0);
+        let kv_usage = kv_usage_map.get(&key).copied();
+
+        const VIRTUAL_TOTAL: u64 = 1_000_000;
+        let (kv_used, kv_free) = match kv_usage {
+            Some(usage) => {
+                let used = (usage * VIRTUAL_TOTAL as f64) as u64;
+                (Some(used), Some(VIRTUAL_TOTAL - used))
+            }
+            None => (None, None),
+        };
+
+        stats.push(EndpointStats {
+            model_uid: key.0,
+            replica_id: key.1,
+            last_updated_ms: now_ms,
+            pending_requests: pending,
+            prefix_cache_hit_rate: None,
+            prompt_cache_hit_rate: None,
+            kv_cache_used_bytes: kv_used,
+            kv_cache_free_bytes: kv_free,
+        });
     }
 
     (StatusCode::OK, Json(stats)).into_response()
@@ -644,4 +714,150 @@ pub async fn audit_logs(
         format!("{existing_query}&tags%5B%5D=audit")
     };
     xtrace_proxy_get(&st, "/api/public/traces", Some(&query)).await
+}
+
+// ---------------------------------------------------------------------------
+// Image Registry CRUD
+// ---------------------------------------------------------------------------
+
+pub async fn list_images(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Viewer) {
+        return resp;
+    }
+    let kvs = match st.store.list_prefix("/images/").await {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "etcd_error",
+                &format!("etcd error: {}", e),
+            )
+        }
+    };
+    let images: Vec<nebula_common::EngineImage> = kvs
+        .into_iter()
+        .filter_map(|(_, v, _)| serde_json::from_slice(&v).ok())
+        .collect();
+    (StatusCode::OK, Json(json!(images))).into_response()
+}
+
+pub async fn get_image(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Viewer) {
+        return resp;
+    }
+    let key = format!("/images/{}", id);
+    match st.store.get(&key).await {
+        Ok(Some((data, _))) => match serde_json::from_slice::<nebula_common::EngineImage>(&data) {
+            Ok(img) => (StatusCode::OK, Json(json!(img))).into_response(),
+            Err(e) => error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "deserialization_error",
+                &format!("deserialization error: {}", e),
+            ),
+        },
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "not_found", "image not found"),
+        Err(e) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "etcd_error",
+            &format!("etcd error: {}", e),
+        ),
+    }
+}
+
+pub async fn put_image(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(id): Path<String>,
+    Json(mut img): Json<nebula_common::EngineImage>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Operator) {
+        return resp;
+    }
+    img.id = id.clone();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    if img.created_at_ms == 0 {
+        img.created_at_ms = now;
+    }
+    img.updated_at_ms = now;
+
+    let val = match serde_json::to_vec(&img) {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "serialization_error",
+                &format!("serialization error: {}", e),
+            )
+        }
+    };
+    let key = format!("/images/{}", id);
+    if let Err(e) = st.store.put(&key, val, None).await {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "etcd_error",
+            &format!("etcd error: {}", e),
+        );
+    }
+    (StatusCode::OK, Json(json!(img))).into_response()
+}
+
+pub async fn delete_image(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Operator) {
+        return resp;
+    }
+    let key = format!("/images/{}", id);
+    if let Err(e) = st.store.delete(&key).await {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "etcd_error",
+            &format!("etcd error: {}", e),
+        );
+    }
+    // Clean up image_status entries
+    if let Ok(kvs) = st.store.list_prefix("/image_status/").await {
+        for (k, _, _) in kvs {
+            if k.ends_with(&format!("/{}", id)) {
+                let _ = st.store.delete(&k).await;
+            }
+        }
+    }
+    (StatusCode::OK, Json(json!({"id": id, "status": "deleted"}))).into_response()
+}
+
+pub async fn list_image_status(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&ctx, Role::Viewer) {
+        return resp;
+    }
+    let kvs = match st.store.list_prefix("/image_status/").await {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "etcd_error",
+                &format!("etcd error: {}", e),
+            )
+        }
+    };
+    let statuses: Vec<nebula_common::NodeImageStatus> = kvs
+        .into_iter()
+        .filter_map(|(_, v, _)| serde_json::from_slice(&v).ok())
+        .collect();
+    (StatusCode::OK, Json(json!(statuses))).into_response()
 }

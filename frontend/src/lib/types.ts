@@ -97,3 +97,24 @@ export interface ClusterStatus {
   placements: PlacementPlan[]
   model_requests: ModelRequest[]
 }
+
+export interface EngineImage {
+  id: string
+  engine_type: string
+  image: string
+  platforms: string[]
+  version_policy: 'pin' | 'rolling'
+  pre_pull: boolean
+  description?: string | null
+  created_at_ms: number
+  updated_at_ms: number
+}
+
+export interface NodeImageStatus {
+  node_id: string
+  image_id: string
+  image: string
+  status: 'pending' | 'pulling' | 'ready' | 'failed'
+  error?: string | null
+  updated_at_ms: number
+}

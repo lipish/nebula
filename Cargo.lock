@@ -1358,6 +1358,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "chrono",
  "clap",
  "nebula-common",
  "nebula-meta",
@@ -1369,6 +1370,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+ "xtrace-client",
 ]
 
 [[package]]
@@ -3830,7 +3832,9 @@ dependencies = [
 
 [[package]]
 name = "xtrace-client"
-version = "0.0.7"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9971d2a8d7f4f4887a4d93b90901ab82a3119b16877112bb1fa2ed1ba63d9c03"
 dependencies = [
  "chrono",
  "reqwest",

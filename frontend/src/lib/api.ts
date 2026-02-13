@@ -61,6 +61,25 @@ export async function apiGetWithParams<T>(
   return (await resp.json()) as T
 }
 
+export async function apiPut<T, Body>(
+  path: string,
+  body: Body,
+  token?: string
+): Promise<T> {
+  const resp = await fetch(`${BASE_URL}${path}`, {
+    method: 'PUT',
+    headers: buildHeaders(token),
+    body: JSON.stringify(body),
+  })
+
+  if (!resp.ok) {
+    const text = await resp.text()
+    throw new Error(text || `Request failed: ${resp.status}`)
+  }
+
+  return (await resp.json()) as T
+}
+
 export async function apiDelete<T>(path: string, token?: string): Promise<T> {
   const resp = await fetch(`${BASE_URL}${path}`, {
     method: 'DELETE',
