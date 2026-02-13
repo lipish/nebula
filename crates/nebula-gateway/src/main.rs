@@ -25,8 +25,9 @@ use crate::engine::{EngineClient, OpenAIEngineClient};
 use crate::handlers::{
     admin_audit_logs, admin_cluster_status, admin_delete_image, admin_delete_request,
     admin_drain_endpoint, admin_get_image, admin_list_image_status, admin_list_images,
-    admin_list_requests, admin_load_model, admin_logs, admin_put_image, admin_scale_request,
-    admin_whoami, create_responses, healthz, list_models, not_implemented, proxy_post,
+    admin_list_requests, admin_load_model, admin_logs, admin_logs_stream, admin_put_image,
+    admin_scale_request, admin_whoami, create_responses, healthz, list_models, not_implemented,
+    proxy_post,
 };
 use crate::metrics::{metrics_handler, track_requests};
 use crate::state::AppState;
@@ -107,6 +108,7 @@ async fn main() {
         .route("/whoami", get(admin_whoami))
         .route("/metrics", get(metrics::admin_metrics))
         .route("/logs", get(admin_logs))
+        .route("/logs/stream", get(admin_logs_stream))
         .route("/models/requests/:id/scale", put(admin_scale_request))
         .route("/endpoints/drain", post(admin_drain_endpoint))
         .route("/audit-logs", get(admin_audit_logs))

@@ -11,6 +11,7 @@ use axum::{
 use bytes::Bytes;
 use serde_json::json;
 use tokio::fs;
+use tokio::io::{AsyncBufReadExt, AsyncSeekExt};
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use uuid::Uuid;
@@ -373,6 +374,66 @@ pub async fn admin_logs(
     let mut out_lines: Vec<&str> = content.lines().rev().take(lines).collect();
     out_lines.reverse();
     (StatusCode::OK, out_lines.join("\n")).into_response()
+}
+
+pub async fn admin_logs_stream(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+) -> Response {
+    if let Some(resp) = require_role(&st.metrics, &ctx, Role::Viewer) {
+        return resp;
+    }
+
+    let log_path = st.log_path.clone();
+    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+
+    tokio::spawn(async move {
+        let file = match tokio::fs::File::open(&log_path).await {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(error=%e, path=%log_path, "failed to open log file for streaming");
+                let _ = tx
+                    .send(Ok(Event::default().data(format!("error: {}", e))))
+                    .await;
+                return;
+            }
+        };
+
+        let mut reader = tokio::io::BufReader::new(file);
+        // Seek to end of file so we only stream new lines
+        if let Err(e) = reader.seek(std::io::SeekFrom::End(0)).await {
+            tracing::warn!(error=%e, "failed to seek to end of log file");
+            return;
+        }
+
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => {
+                    // No new data; wait and try again
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                Ok(_) => {
+                    let trimmed = line.trim_end();
+                    if !trimmed.is_empty() {
+                        if tx.send(Ok(Event::default().data(trimmed.to_string()))).await.is_err() {
+                            // Client disconnected
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error=%e, "error reading log file");
+                    break;
+                }
+            }
+        }
+    });
+
+    Sse::new(ReceiverStream::new(rx))
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)))
+        .into_response()
 }
 
 pub async fn list_models(State(st): State<AppState>) -> impl IntoResponse {

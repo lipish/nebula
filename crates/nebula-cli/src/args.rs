@@ -41,6 +41,9 @@ pub enum Command {
         /// Lines to return (default 200, max 2000)
         #[arg(long)]
         lines: Option<u32>,
+        /// Follow log output (stream new lines via SSE)
+        #[arg(long, short = 'f', default_value_t = false)]
+        follow: bool,
     },
     /// Interactive chat via Gateway
     Chat {

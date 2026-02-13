@@ -6,6 +6,7 @@ mod output;
 
 use anyhow::Result;
 use clap::Parser;
+use futures_util::StreamExt;
 use reqwest::Client;
 
 use nebula_common::{ClusterStatus, ModelLoadRequest, ModelRequest};
@@ -121,13 +122,48 @@ async fn main() -> Result<()> {
             let resp = auth(client.get(&url), token.as_ref()).send().await?;
             println!("{}", resp.text().await?);
         }
-        Command::Logs { lines } => {
-            let mut url = format!("{}/v1/admin/logs", args.gateway_url.trim_end_matches('/'));
-            if let Some(n) = lines {
-                url = format!("{}?lines={}", url, n);
+        Command::Logs { lines, follow } => {
+            if follow {
+                let url = format!(
+                    "{}/v1/admin/logs/stream",
+                    args.gateway_url.trim_end_matches('/')
+                );
+                let resp = auth(client.get(&url), token.as_ref()).send().await?;
+                if !resp.status().is_success() {
+                    eprintln!("✗ Failed to stream logs: {}", resp.status());
+                    std::process::exit(1);
+                }
+                let mut stream = resp.bytes_stream();
+                let mut buf = String::new();
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk?;
+                    let s = String::from_utf8_lossy(&chunk);
+                    buf.push_str(&s);
+
+                    while let Some(pos) = buf.find('\n') {
+                        let line = buf[..pos].trim().to_string();
+                        buf.drain(..=pos);
+
+                        if line.is_empty() {
+                            continue;
+                        }
+                        if let Some(data) = line.strip_prefix("data:") {
+                            let data = data.trim();
+                            if !data.is_empty() {
+                                println!("{}", data);
+                            }
+                        }
+                    }
+                }
+            } else {
+                let mut url =
+                    format!("{}/v1/admin/logs", args.gateway_url.trim_end_matches('/'));
+                if let Some(n) = lines {
+                    url = format!("{}?lines={}", url, n);
+                }
+                let resp = auth(client.get(&url), token.as_ref()).send().await?;
+                println!("{}", resp.text().await?);
             }
-            let resp = auth(client.get(&url), token.as_ref()).send().await?;
-            println!("{}", resp.text().await?);
         }
         Command::Chat {
             model,
