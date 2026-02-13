@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tracing::{info, warn};
@@ -8,6 +10,7 @@ use nebula_common::{
 };
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
+use crate::metrics::SharedMetrics;
 use crate::planner::{allocate_port, list_used_resources, select_node_and_gpus};
 use crate::util::now_ms;
 
@@ -35,20 +38,27 @@ const SCALE_DOWN_COOLDOWN_MS: u64 = 300_000; // 5 minutes
 /// For each model with a PlacementPlan:
 ///   1. Check endpoint health — remove stale assignments whose endpoints timed out.
 ///   2. Check replica count — if fewer healthy replicas than desired, try to add new ones.
-pub async fn reconcile_loop(store: EtcdMetaStore, default_port: u16, xtrace: Option<xtrace_client::Client>) {
+pub async fn reconcile_loop(
+    store: EtcdMetaStore,
+    default_port: u16,
+    xtrace: Option<xtrace_client::Client>,
+    metrics: Arc<SharedMetrics>,
+) {
     // Wait a bit before first reconcile to let the system stabilize.
     tokio::time::sleep(Duration::from_secs(10)).await;
     info!("reconcile loop started (interval={}s)", RECONCILE_INTERVAL.as_secs());
 
     loop {
-        if let Err(e) = reconcile_once(&store, default_port, xtrace.as_ref()).await {
+        metrics.reconcile_total.fetch_add(1, Ordering::Relaxed);
+        if let Err(e) = reconcile_once(&store, default_port, xtrace.as_ref(), &metrics).await {
+            metrics.reconcile_errors.fetch_add(1, Ordering::Relaxed);
             warn!(error=%e, "reconcile cycle failed");
         }
         tokio::time::sleep(RECONCILE_INTERVAL).await;
     }
 }
 
-async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option<&xtrace_client::Client>) -> anyhow::Result<()> {
+async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option<&xtrace_client::Client>, metrics: &SharedMetrics) -> anyhow::Result<()> {
     let now = now_ms();
 
     // 1. Load all placements
@@ -59,6 +69,9 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
             plans.push(plan);
         }
     }
+
+    // Update placement gauge
+    metrics.placements_total.store(plans.len() as u64, Ordering::Relaxed);
 
     if plans.is_empty() {
         return Ok(());
@@ -104,6 +117,7 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
             .unwrap_or(base_replicas);
 
         // Compute desired replicas: start from base, adjust by load signals
+        let current_replicas = plan.assignments.len() as u32;
         let desired_replicas = compute_desired_replicas(
             base_replicas,
             min_replicas,
@@ -112,6 +126,12 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
             stats_by_model.get(&plan.model_uid),
             now,
         );
+
+        if desired_replicas > current_replicas {
+            metrics.scale_up_total.fetch_add(1, Ordering::Relaxed);
+        } else if desired_replicas < current_replicas {
+            metrics.scale_down_total.fetch_add(1, Ordering::Relaxed);
+        }
 
         // Identify healthy vs stale assignments
         let mut healthy_assignments = Vec::new();
@@ -131,6 +151,7 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
                             "endpoint stale/unhealthy, removing assignment"
                         );
                         stale_replica_ids.push(assignment.replica_id);
+                        metrics.unhealthy_endpoints_total.fetch_add(1, Ordering::Relaxed);
                     } else {
                         healthy_assignments.push(assignment.clone());
                     }
@@ -147,6 +168,7 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
                             "no endpoint registered after 2min, removing assignment"
                         );
                         stale_replica_ids.push(assignment.replica_id);
+                        metrics.unhealthy_endpoints_total.fetch_add(1, Ordering::Relaxed);
                     } else {
                         // Still within startup grace period, keep it.
                         healthy_assignments.push(assignment.clone());

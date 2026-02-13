@@ -1,32 +1,65 @@
 mod args;
+mod metrics;
 mod planner;
 mod reconcile;
 mod util;
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use anyhow::Result;
+use axum::routing::get;
+use axum::Router;
 use clap::Parser;
 use futures_util::StreamExt;
-use std::time::Duration;
 use tracing::{error, info, warn};
-use tracing_subscriber::EnvFilter;
 
 use nebula_common::{ModelRequest, ModelRequestStatus};
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
 use crate::args::Args;
+use crate::metrics::{healthz_handler, metrics_handler, SharedMetrics};
 use crate::planner::{build_plan_multi, list_used_resources};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
-
     let args = Args::parse();
+
+    let _otel_guard = nebula_common::telemetry::init_tracing(
+        "nebula-scheduler",
+        args.xtrace_url.as_deref(),
+        args.xtrace_token.as_deref(),
+        &args.log_format,
+    );
     info!("nebula-scheduler starting...");
 
     let store = EtcdMetaStore::connect(std::slice::from_ref(&args.etcd_endpoint)).await?;
     info!("connected to etcd at {}", args.etcd_endpoint);
+
+    // Shared metrics for Prometheus exposition
+    let shared_metrics = Arc::new(SharedMetrics::default());
+
+    // Spawn metrics / health HTTP server
+    let listen_addr = args.listen_addr.clone();
+    let metrics_state = Arc::clone(&shared_metrics);
+    tokio::spawn(async move {
+        let app = Router::new()
+            .route("/metrics", get(metrics_handler))
+            .route("/healthz", get(healthz_handler))
+            .with_state(metrics_state);
+
+        let listener = match tokio::net::TcpListener::bind(&listen_addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!("failed to bind metrics server on {}: {}", listen_addr, e);
+                return;
+            }
+        };
+        info!("metrics server listening on {}", listen_addr);
+        if let Err(e) = axum::serve(listener, app).await {
+            error!("metrics server error: {}", e);
+        }
+    });
 
     // Create xtrace client for stats queries
     let xtrace = args.xtrace_url.as_deref().and_then(|url| {
@@ -46,8 +79,15 @@ async fn main() -> Result<()> {
     // Spawn reconcile loop (health self-healing)
     let store_for_reconcile = store.clone();
     let default_port_for_reconcile = args.default_port;
+    let metrics_for_reconcile = Arc::clone(&shared_metrics);
     tokio::spawn(async move {
-        reconcile::reconcile_loop(store_for_reconcile, default_port_for_reconcile, xtrace).await;
+        reconcile::reconcile_loop(
+            store_for_reconcile,
+            default_port_for_reconcile,
+            xtrace,
+            metrics_for_reconcile,
+        )
+        .await;
     });
 
     // Watch for model requests
