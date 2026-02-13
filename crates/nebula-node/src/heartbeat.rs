@@ -212,17 +212,8 @@ pub async fn heartbeat_loop(
                             }
                         }
 
-                        let stats_key = format!("/stats/{}/{}", rm.model_uid, rm.replica_id);
-                        match serde_json::to_vec(&stats) {
-                            Ok(bytes) => {
-                                if let Err(e) = store.put(&stats_key, bytes, Some(ttl_ms)).await {
-                                    tracing::warn!(error=%e, %stats_key, "failed to write engine stats");
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(error=%e, "failed to serialize engine stats");
-                            }
-                        }
+                        // Stats are now pushed to xtrace only (via metric_points above).
+                        // No longer written to etcd /stats/.
                     }
                 } else {
                     *count += 1;

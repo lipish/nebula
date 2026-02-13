@@ -202,6 +202,7 @@ fn make_assignment(
         gpu_indices: gpu_indices_field,
         extra_args,
         engine_type: None,
+        docker_image: None,
     }
 }
 

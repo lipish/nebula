@@ -3,6 +3,7 @@ mod docker_api;
 mod engine;
 mod gpu;
 mod heartbeat;
+mod image_manager;
 mod reconcile;
 mod util;
 
@@ -70,6 +71,12 @@ async fn main() -> anyhow::Result<()> {
         endpoint_state.clone(),
         running.clone(),
         xtrace,
+    ));
+
+    // Start image manager: watches /images/ registry, pre-pulls and GC
+    tokio::spawn(image_manager::image_manager_loop(
+        store.clone(),
+        args.node_id.clone(),
     ));
 
     // Start Node HTTP API server

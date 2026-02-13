@@ -110,46 +110,113 @@ pub async fn placement_sync_loop(
 }
 
 pub async fn stats_sync_loop(
-    store: EtcdMetaStore,
+    xtrace: xtrace_client::Client,
     router: Arc<nebula_router::Router>,
 ) -> anyhow::Result<()> {
+    use std::collections::HashMap;
+
+    const POLL_INTERVAL: Duration = Duration::from_secs(10);
+
     loop {
-        // Snapshot: load all existing stats
-        match store.list_prefix("/stats/").await {
-            Ok(items) => {
-                for (_k, v, _rev) in items {
-                    if let Ok(stats) = serde_json::from_slice::<EndpointStats>(&v) {
-                        router.upsert_stats(stats);
+        let now = chrono::Utc::now();
+        let from = now - chrono::Duration::seconds(60);
+
+        // Query latest pending_requests and kv_cache_usage from xtrace
+        let mut pending_map: HashMap<(String, u32), u64> = HashMap::new();
+        let mut kv_usage_map: HashMap<(String, u32), f64> = HashMap::new();
+
+        for (metric_name, target_map_is_pending) in
+            [("pending_requests", true), ("kv_cache_usage", false)]
+        {
+            let q = xtrace_client::MetricsQueryParams {
+                name: metric_name.to_string(),
+                from: Some(from),
+                to: Some(now),
+                step: Some("60s".to_string()),
+                agg: Some("last".to_string()),
+                ..Default::default()
+            };
+
+            match xtrace.query_metrics(&q).await {
+                Ok(resp) => {
+                    for series in &resp.data {
+                        let model_uid = series.labels.get("model_uid")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let replica_id: u32 = series.labels.get("replica_id")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0);
+
+                        if model_uid.is_empty() {
+                            continue;
+                        }
+
+                        if let Some(last) = series.values.last() {
+                            let key = (model_uid, replica_id);
+                            if target_map_is_pending {
+                                pending_map.insert(key, last.value as u64);
+                            } else {
+                                kv_usage_map.insert(key, last.value);
+                            }
+                        }
                     }
                 }
-            }
-            Err(e) => {
-                tracing::warn!(error=%e, "failed to list stats, will retry");
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
-            }
-        }
-
-        // Watch for changes
-        let mut stream = match store.watch_prefix("/stats/", None).await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(error=%e, "failed to watch stats, will retry");
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
-            }
-        };
-
-        while let Some(ev) = stream.next().await {
-            if let Some(v) = ev.value {
-                if let Ok(stats) = serde_json::from_slice::<EndpointStats>(&v) {
-                    router.upsert_stats(stats);
+                Err(e) => {
+                    tracing::warn!(metric=%metric_name, error=%e, "failed to query xtrace metrics");
                 }
             }
-            // Stats deletion: no action needed, stale stats will be overwritten on next scrape
         }
 
-        tracing::warn!("stats watch stream ended, reconnecting");
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // Merge into EndpointStats and upsert
+        let mut all_keys: std::collections::HashSet<(String, u32)> = std::collections::HashSet::new();
+        all_keys.extend(pending_map.keys().cloned());
+        all_keys.extend(kv_usage_map.keys().cloned());
+
+        let now_ms = now.timestamp_millis() as u64;
+        for key in all_keys {
+            let pending = pending_map.get(&key).copied().unwrap_or(0);
+            let kv_usage = kv_usage_map.get(&key).copied();
+
+            let stats = EndpointStats {
+                model_uid: key.0,
+                replica_id: key.1,
+                last_updated_ms: now_ms,
+                pending_requests: pending,
+                prefix_cache_hit_rate: None,
+                prompt_cache_hit_rate: None,
+                kv_cache_used_bytes: None,
+                kv_cache_free_bytes: if kv_usage.is_some() {
+                    // Store kv_cache_usage (0..1) as synthetic used/free so Router
+                    // can compute the ratio the same way.  Use 1_000_000 as virtual total.
+                    let usage = kv_usage.unwrap();
+                    let total: u64 = 1_000_000;
+                    let used = (usage * total as f64) as u64;
+                    // Overwrite both fields
+                    // (we'll set kv_cache_used_bytes right after this block)
+                    Some(total - used)
+                } else {
+                    None
+                },
+            };
+
+            // Patch kv_cache_used_bytes if we have usage
+            let stats = if let Some(usage) = kv_usage {
+                let total: u64 = 1_000_000;
+                let used = (usage * total as f64) as u64;
+                EndpointStats {
+                    kv_cache_used_bytes: Some(used),
+                    kv_cache_free_bytes: Some(total - used),
+                    ..stats
+                }
+            } else {
+                stats
+            };
+
+            router.upsert_stats(stats);
+        }
+
+        tokio::time::sleep(POLL_INTERVAL).await;
     }
 }

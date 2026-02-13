@@ -1482,6 +1482,7 @@ dependencies = [
  "anyhow",
  "axum",
  "bytes",
+ "chrono",
  "clap",
  "dashmap",
  "futures-core",
@@ -1497,6 +1498,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "xtrace-client",
 ]
 
 [[package]]

@@ -21,6 +21,11 @@ pub struct PlacementAssignment {
     /// Engine type: "vllm", "sglang", etc. Defaults to "vllm" if absent.
     #[serde(default)]
     pub engine_type: Option<String>,
+
+    /// Override docker image for this assignment. If set, takes precedence over
+    /// the node-level engine docker_image CLI arg.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker_image: Option<String>,
 }
 
 impl PlacementAssignment {

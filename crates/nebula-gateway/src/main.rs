@@ -23,9 +23,10 @@ use crate::audit::AuditWriter;
 use crate::auth::parse_auth_from_env;
 use crate::engine::{EngineClient, OpenAIEngineClient};
 use crate::handlers::{
-    admin_audit_logs, admin_cluster_status, admin_delete_request, admin_drain_endpoint,
-    admin_list_requests, admin_load_model, admin_logs, admin_scale_request, admin_whoami,
-    create_responses, healthz, list_models, not_implemented, proxy_post,
+    admin_audit_logs, admin_cluster_status, admin_delete_image, admin_delete_request,
+    admin_drain_endpoint, admin_get_image, admin_list_image_status, admin_list_images,
+    admin_list_requests, admin_load_model, admin_logs, admin_put_image, admin_scale_request,
+    admin_whoami, create_responses, healthz, list_models, not_implemented, proxy_post,
 };
 use crate::metrics::{metrics_handler, track_requests};
 use crate::state::AppState;
@@ -108,6 +109,15 @@ async fn main() {
         .route("/models/requests/:id/scale", put(admin_scale_request))
         .route("/endpoints/drain", post(admin_drain_endpoint))
         .route("/audit-logs", get(admin_audit_logs))
+        // Image registry
+        .route("/images", get(admin_list_images))
+        .route(
+            "/images/:id",
+            get(admin_get_image)
+                .put(admin_put_image)
+                .delete(admin_delete_image),
+        )
+        .route("/images/status", get(admin_list_image_status))
         .with_state(st.clone());
 
     let app = Router::new()

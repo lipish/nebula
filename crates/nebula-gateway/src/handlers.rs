@@ -665,6 +665,157 @@ pub async fn admin_drain_endpoint(
         .into_response()
 }
 
+// ---------------------------------------------------------------------------
+// Image Registry CRUD
+// ---------------------------------------------------------------------------
+
+pub async fn admin_list_images(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&st.metrics, &ctx, Role::Viewer) {
+        return resp;
+    }
+    let kvs = match st.store.list_prefix("/images/").await {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("etcd error: {}", e),
+            )
+                .into_response();
+        }
+    };
+    let images: Vec<nebula_common::EngineImage> = kvs
+        .into_iter()
+        .filter_map(|(_, v, _)| serde_json::from_slice(&v).ok())
+        .collect();
+    (StatusCode::OK, Json(json!(images))).into_response()
+}
+
+pub async fn admin_get_image(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&st.metrics, &ctx, Role::Viewer) {
+        return resp;
+    }
+    let key = format!("/images/{}", id);
+    match st.store.get(&key).await {
+        Ok(Some((data, _))) => match serde_json::from_slice::<nebula_common::EngineImage>(&data) {
+            Ok(img) => (StatusCode::OK, Json(json!(img))).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("deserialization error: {}", e),
+            )
+                .into_response(),
+        },
+        Ok(None) => (StatusCode::NOT_FOUND, "image not found").into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("etcd error: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn admin_put_image(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(id): Path<String>,
+    Json(mut img): Json<nebula_common::EngineImage>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&st.metrics, &ctx, Role::Operator) {
+        return resp;
+    }
+    img.id = id.clone();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    if img.created_at_ms == 0 {
+        img.created_at_ms = now;
+    }
+    img.updated_at_ms = now;
+
+    let val = match serde_json::to_vec(&img) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("serialization error: {}", e),
+            )
+                .into_response();
+        }
+    };
+    let key = format!("/images/{}", id);
+    if let Err(e) = st.store.put(&key, val, None).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("etcd error: {}", e),
+        )
+            .into_response();
+    }
+    (StatusCode::OK, Json(json!(img))).into_response()
+}
+
+pub async fn admin_delete_image(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&st.metrics, &ctx, Role::Operator) {
+        return resp;
+    }
+    let key = format!("/images/{}", id);
+    if let Err(e) = st.store.delete(&key).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("etcd error: {}", e),
+        )
+            .into_response();
+    }
+    // Also clean up image_status entries for this image
+    let status_prefix = format!("/image_status/");
+    if let Ok(kvs) = st.store.list_prefix(&status_prefix).await {
+        for (k, _, _) in kvs {
+            if k.ends_with(&format!("/{}", id)) {
+                let _ = st.store.delete(&k).await;
+            }
+        }
+    }
+    (
+        StatusCode::OK,
+        Json(json!({"id": id, "status": "deleted"})),
+    )
+        .into_response()
+}
+
+pub async fn admin_list_image_status(
+    State(st): State<AppState>,
+    Extension(ctx): Extension<AuthContext>,
+) -> impl IntoResponse {
+    if let Some(resp) = require_role(&st.metrics, &ctx, Role::Viewer) {
+        return resp;
+    }
+    let kvs = match st.store.list_prefix("/image_status/").await {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("etcd error: {}", e),
+            )
+                .into_response();
+        }
+    };
+    let statuses: Vec<nebula_common::NodeImageStatus> = kvs
+        .into_iter()
+        .filter_map(|(_, v, _)| serde_json::from_slice(&v).ok())
+        .collect();
+    (StatusCode::OK, Json(json!(statuses))).into_response()
+}
+
 pub async fn admin_audit_logs(
     State(st): State<AppState>,
     Extension(ctx): Extension<AuthContext>,

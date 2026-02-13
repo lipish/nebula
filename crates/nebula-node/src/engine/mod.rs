@@ -196,13 +196,34 @@ pub(crate) async fn stop_docker_container_by_name(name: &str) {
 
 /// Create the appropriate Engine implementation based on engine_type string.
 /// Defaults to "vllm" if engine_type is None or unrecognized.
-pub fn create_engine(args: &Args, engine_type: Option<&str>) -> Box<dyn Engine> {
+/// If `docker_image_override` is Some, it takes precedence over the node-level CLI arg.
+pub fn create_engine(
+    args: &Args,
+    engine_type: Option<&str>,
+    docker_image_override: Option<&str>,
+) -> Box<dyn Engine> {
     match engine_type.unwrap_or("vllm") {
-        "vllm" => Box::new(vllm::VllmEngine::new(args)),
-        "sglang" => Box::new(sglang::SglangEngine::new(args)),
+        "vllm" => {
+            let mut engine = vllm::VllmEngine::new(args);
+            if let Some(img) = docker_image_override {
+                engine.config.docker_image = Some(img.to_string());
+            }
+            Box::new(engine)
+        }
+        "sglang" => {
+            let mut engine = sglang::SglangEngine::new(args);
+            if let Some(img) = docker_image_override {
+                engine.config.docker_image = Some(img.to_string());
+            }
+            Box::new(engine)
+        }
         other => {
             tracing::warn!(engine_type=%other, "unknown engine type, falling back to vllm");
-            Box::new(vllm::VllmEngine::new(args))
+            let mut engine = vllm::VllmEngine::new(args);
+            if let Some(img) = docker_image_override {
+                engine.config.docker_image = Some(img.to_string());
+            }
+            Box::new(engine)
         }
     }
 }

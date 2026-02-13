@@ -75,11 +75,12 @@
 - **适配矩阵**：维护 `(硬件, 引擎, 模型) → 镜像` 的映射表，前端 Load Model 时自动推荐最优引擎和镜像组合。
 - **镜像族**：同一引擎可能有多个镜像变体（CUDA 12.4 / 12.8 / 昇腾 CANN 8.0 等），按节点硬件自动选择。
 
-### 7.2 引擎镜像管理
-- **镜像注册表**：维护可用镜像列表（引擎类型、tag、硬件兼容性、大小），前端/CLI 可选择。
-- **镜像预拉取**：新节点加入集群时根据硬件类型自动 `docker pull` 对应镜像；支持私有 registry。
-- **版本策略**：支持 pin 版本（生产稳定）和 rolling（跟踪 nightly），节点级别可覆盖。
-- **清理**：定期清理未使用的旧镜像，释放磁盘空间。
+### 7.2 引擎镜像管理 ✅
+- **镜像注册表**：`EngineImage` 数据结构存储在 etcd `/images/{id}`，Gateway CRUD API (`/v1/admin/images`)。
+- **镜像预拉取**：Node 启动时扫描 + watch `/images/` 前缀，自动 `docker pull` 匹配镜像；状态上报到 `/image_status/{node_id}/{image_id}`。
+- **版本策略**：`VersionPolicy::Pin`（本地有则跳过）和 `Rolling`（每次 re-pull 获取最新 digest）。
+- **清理**：Node 每小时 GC，清理不在注册表且未被容器使用的引擎镜像。
+- **per-model 镜像覆盖**：`PlacementAssignment.docker_image` 字段，优先于 Node CLI 默认镜像。
 
 ### 7.3 模型文件管理
 - **统一缓存目录**：所有节点使用约定路径（如 `/DATA/Model`）存放模型文件，容器挂载该目录。

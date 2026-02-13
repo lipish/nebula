@@ -257,6 +257,7 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16) -> anyhow::Res
                                 gpu_indices: gpu_indices_field,
                                 extra_args: extra_args.clone(),
                                 engine_type: None,
+                                docker_image: None,
                             });
 
                             info!(

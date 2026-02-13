@@ -93,9 +93,11 @@ pub async fn reconcile_model(
         endpoint_state.lock().await.remove(model_uid);
     }
 
-    // Create engine instance based on assignment's engine_type
+    // Create engine instance based on assignment's engine_type and optional docker image override
     let engine_type = assignment.engine_type.as_deref();
-    let engine: Arc<dyn Engine> = Arc::from(crate::engine::create_engine(args, engine_type));
+    let docker_image_override = assignment.docker_image.as_deref();
+    let engine: Arc<dyn Engine> =
+        Arc::from(crate::engine::create_engine(args, engine_type, docker_image_override));
 
     let ctx = EngineStartContext {
         model_uid: model_uid.to_string(),
