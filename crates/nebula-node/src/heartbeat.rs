@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::Utc;
 use tokio::sync::Mutex;
 
 use nebula_common::{EndpointInfo, EndpointStatus, NodeStatus};
@@ -50,6 +51,7 @@ pub async fn heartbeat_loop(
     api_port: u16,
     endpoint: Arc<Mutex<HashMap<String, EndpointInfo>>>,
     running: Arc<Mutex<HashMap<String, RunningModel>>>,
+    xtrace: Option<xtrace_client::Client>,
 ) {
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -63,7 +65,48 @@ pub async fn heartbeat_loop(
 
     let key = format!("/nodes/{}/status", node_id);
     loop {
+        let mut metric_points: Vec<xtrace_client::MetricPoint> = Vec::new();
         let gpus = read_gpu_statuses().await;
+
+        // Collect GPU metrics for xtrace
+        if xtrace.is_some() {
+            let ts = Utc::now();
+            for gpu in &gpus {
+                let labels = HashMap::from([
+                    ("node_id".to_string(), node_id.clone()),
+                    ("gpu_index".to_string(), gpu.index.to_string()),
+                ]);
+                metric_points.push(xtrace_client::MetricPoint {
+                    name: "gpu_memory_used_mb".to_string(),
+                    labels: labels.clone(),
+                    value: gpu.memory_used_mb as f64,
+                    timestamp: ts,
+                });
+                metric_points.push(xtrace_client::MetricPoint {
+                    name: "gpu_memory_total_mb".to_string(),
+                    labels: labels.clone(),
+                    value: gpu.memory_total_mb as f64,
+                    timestamp: ts,
+                });
+                if let Some(temp) = gpu.temperature_c {
+                    metric_points.push(xtrace_client::MetricPoint {
+                        name: "gpu_temperature".to_string(),
+                        labels: labels.clone(),
+                        value: temp as f64,
+                        timestamp: ts,
+                    });
+                }
+                if let Some(util) = gpu.utilization_gpu {
+                    metric_points.push(xtrace_client::MetricPoint {
+                        name: "gpu_utilization".to_string(),
+                        labels,
+                        value: util as f64,
+                        timestamp: ts,
+                    });
+                }
+            }
+        }
+
         let status = NodeStatus {
             node_id: node_id.clone(),
             last_heartbeat_ms: now_ms(),
@@ -141,6 +184,40 @@ pub async fn heartbeat_loop(
                     if let Some(stats) =
                         scrape_engine_stats(&http, &rm.base_url, &rm.model_uid, rm.replica_id).await
                     {
+                        // Collect engine stats for xtrace
+                        if xtrace.is_some() {
+                            let ts = Utc::now();
+                            let labels = HashMap::from([
+                                ("node_id".to_string(), node_id.clone()),
+                                ("model_uid".to_string(), rm.model_uid.clone()),
+                                ("replica_id".to_string(), rm.replica_id.to_string()),
+                            ]);
+                            metric_points.push(xtrace_client::MetricPoint {
+                                name: "pending_requests".to_string(),
+                                labels: labels.clone(),
+                                value: stats.pending_requests as f64,
+                                timestamp: ts,
+                            });
+                            if let (Some(used), Some(free)) = (stats.kv_cache_used_bytes, stats.kv_cache_free_bytes) {
+                                let total = used + free;
+                                let usage = if total > 0 { used as f64 / total as f64 } else { 0.0 };
+                                metric_points.push(xtrace_client::MetricPoint {
+                                    name: "kv_cache_usage".to_string(),
+                                    labels: labels.clone(),
+                                    value: usage,
+                                    timestamp: ts,
+                                });
+                            }
+                            if let Some(rate) = stats.prefix_cache_hit_rate {
+                                metric_points.push(xtrace_client::MetricPoint {
+                                    name: "prefix_cache_hit_rate".to_string(),
+                                    labels,
+                                    value: rate,
+                                    timestamp: ts,
+                                });
+                            }
+                        }
+
                         let stats_key = format!("/stats/{}/{}", rm.model_uid, rm.replica_id);
                         match serde_json::to_vec(&stats) {
                             Ok(bytes) => {
@@ -184,6 +261,19 @@ pub async fn heartbeat_loop(
                         restart_at.insert(rm.model_uid.clone(), now_ms());
                     }
                 }
+            }
+        }
+
+        // Push metrics to xtrace (non-blocking, best-effort)
+        if let Some(ref client) = xtrace {
+            if !metric_points.is_empty() {
+                let client = client.clone();
+                let points = std::mem::take(&mut metric_points);
+                tokio::spawn(async move {
+                    if let Err(e) = client.push_metrics(&points).await {
+                        tracing::debug!(error=%e, "failed to push metrics to xtrace");
+                    }
+                });
             }
         }
 

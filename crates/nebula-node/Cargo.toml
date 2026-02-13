@@ -17,5 +17,8 @@ tokio-stream.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+chrono.workspace = true
+xtrace-client.workspace = true
+
 nebula-common = { path = "../nebula-common" }
 nebula-meta = { path = "../nebula-meta" }

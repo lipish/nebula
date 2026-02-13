@@ -9,6 +9,7 @@ members = [
   "crates/nebula-gateway",
   "crates/nebula-node",
   "crates/nebula-cli",
+  "crates/nebula-observe",
 ]
 
 [workspace.package]
@@ -33,3 +34,6 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+xtrace-client = "0.0.7"
+xtrace = "0.0.7"

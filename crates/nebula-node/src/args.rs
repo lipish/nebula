@@ -73,4 +73,13 @@ pub struct Args {
     /// Port for the Node HTTP API (containers, images, etc.).
     #[arg(long, default_value_t = 9090)]
     pub api_port: u16,
+
+    /// xtrace server URL for metrics reporting (e.g. "http://10.21.11.92:8742/").
+    /// If not set, metrics reporting is disabled.
+    #[arg(long, env = "XTRACE_URL")]
+    pub xtrace_url: Option<String>,
+
+    /// xtrace bearer token for authentication.
+    #[arg(long, env = "XTRACE_TOKEN")]
+    pub xtrace_token: Option<String>,
 }

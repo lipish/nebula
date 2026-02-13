@@ -22,6 +22,21 @@ use crate::args::Args;
 use crate::heartbeat::heartbeat_loop;
 use crate::reconcile::{reconcile_model, RunningModel};
 
+fn init_xtrace_client(args: &Args) -> Option<xtrace_client::Client> {
+    let url = args.xtrace_url.as_deref()?;
+    let token = args.xtrace_token.as_deref().unwrap_or("");
+    match xtrace_client::Client::new(url, token) {
+        Ok(c) => {
+            tracing::info!(%url, "xtrace metrics reporting enabled");
+            Some(c)
+        }
+        Err(e) => {
+            tracing::warn!(error=%e, "failed to create xtrace client, metrics reporting disabled");
+            None
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -44,6 +59,8 @@ async fn main() -> anyhow::Result<()> {
     let running: Arc<Mutex<HashMap<String, RunningModel>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
+    let xtrace = init_xtrace_client(&args);
+
     tokio::spawn(heartbeat_loop(
         store.clone(),
         args.node_id.clone(),
@@ -52,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
         args.api_port,
         endpoint_state.clone(),
         running.clone(),
+        xtrace,
     ));
 
     // Start Node HTTP API server
