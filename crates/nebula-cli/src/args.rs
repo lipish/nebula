@@ -42,6 +42,39 @@ pub enum Command {
         #[arg(long)]
         lines: Option<u32>,
     },
+    /// Interactive chat via Gateway
+    Chat {
+        /// Model name to use
+        #[arg(long, short = 'm')]
+        model: Option<String>,
+        /// System prompt
+        #[arg(long)]
+        system: Option<String>,
+        /// Single-shot message (non-interactive)
+        #[arg(long)]
+        message: Option<String>,
+        /// Max tokens for response
+        #[arg(long, default_value_t = 2048)]
+        max_tokens: u32,
+    },
+    /// Scale model replicas
+    Scale {
+        /// Model request ID
+        #[arg(long)]
+        id: String,
+        /// New replica count
+        #[arg(long)]
+        replicas: u32,
+    },
+    /// Drain an endpoint (graceful shutdown)
+    Drain {
+        /// model_uid of the endpoint
+        #[arg(long)]
+        model_uid: String,
+        /// replica_id of the endpoint
+        #[arg(long)]
+        replica_id: u32,
+    },
 }
 
 #[derive(Debug, Subcommand)]

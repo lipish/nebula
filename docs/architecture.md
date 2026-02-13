@@ -150,9 +150,25 @@ etcd (2379)     ──  权威状态存储
 |------|------|
 | `POST /v1/chat/completions` (stream/non-stream) | ✅ 已实现 |
 | `POST /v1/responses` (stream/non-stream) | ✅ 已实现 |
-| `POST /v1/embeddings` | 🚧 返回 501 |
+| `POST /v1/embeddings` | ✅ 已实现（代理到 Router） |
+| `POST /v1/rerank` | ✅ 已实现（代理到 Router） |
+| `GET /v1/models` | ✅ 已实现 |
 
-### 7.2 Responses API（重点）
+### 7.2 Admin API
+
+| 接口 | 说明 | 权限 |
+|------|------|------|
+| `GET /v1/admin/cluster/status` | 集群状态总览 | viewer |
+| `GET /v1/admin/models/requests` | 列出所有模型请求 | viewer |
+| `POST /v1/admin/models/load` | 加载模型 | operator |
+| `DELETE /v1/admin/models/requests/:id` | 卸载模型 | operator |
+| `PUT /v1/admin/models/requests/:id/scale` | 调整副本数 | operator |
+| `POST /v1/admin/endpoints/drain` | 端点优雅下线 | operator |
+| `GET /v1/admin/whoami` | 当前身份 | viewer |
+| `GET /v1/admin/metrics` | 管理指标 | viewer |
+| `GET /v1/admin/logs` | 查看日志 | viewer |
+
+### 7.3 Responses API（重点）
 
 `/v1/responses` 的 streaming 严格对齐 OpenAI：
 
@@ -161,7 +177,7 @@ etcd (2379)     ──  权威状态存储
 - 最小事件序列：`response.created` → `response.output_text.delta`（多次） → `response.completed`
 - 每个事件必须包含 `type` 和 `sequence_number`（单调递增）
 
-### 7.3 Tool Calling（best-effort）
+### 7.4 Tool Calling（best-effort）
 
 - Gateway 默认开启 `tool_call_mode=best_effort`
 - 注入工具 schema 到 instructions → 引擎输出 → 解析为 tool call → schema 校验 → 失败则 retry

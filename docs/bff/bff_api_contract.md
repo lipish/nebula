@@ -174,13 +174,62 @@ Response:
 }
 ```
 
-### 4.7 Metrics (Read-only)
+### 4.7 Scale Model Replicas
+
+`PUT /api/models/requests/:id/scale`
+
+Request:
+
+```json
+{
+  "replicas": 3
+}
+```
+
+Response:
+
+```json
+{
+  "request_id": "req_abc",
+  "old_replicas": 1,
+  "new_replicas": 3
+}
+```
+
+Role: `operator`+. Scheduler reconcile loop will automatically adjust endpoint count.
+
+### 4.8 Drain Endpoint
+
+`POST /api/endpoints/drain`
+
+Request:
+
+```json
+{
+  "model_uid": "qwen2_5_0_5b",
+  "replica_id": 0
+}
+```
+
+Response:
+
+```json
+{
+  "model_uid": "qwen2_5_0_5b",
+  "replica_id": 0,
+  "status": "draining"
+}
+```
+
+Role: `operator`+. Sets endpoint status to `Draining`; Router stops routing new requests to it. Already-draining endpoints return `{"status": "already_draining"}`.
+
+### 4.9 Metrics (Read-only)
 
 `GET /api/metrics`
 
 - Returns raw Prometheus text or a JSON summary (choose one and document).
 
-### 4.8 Logs (Read-only)
+### 4.10 Logs (Read-only)
 
 `GET /api/logs?lines=200`
 

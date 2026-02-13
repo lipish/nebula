@@ -1,4 +1,5 @@
 mod args;
+mod chat;
 mod client;
 mod config;
 mod output;
@@ -125,6 +126,58 @@ async fn main() -> Result<()> {
             }
             let resp = auth(client.get(&url), token.as_ref()).send().await?;
             println!("{}", resp.text().await?);
+        }
+        Command::Chat {
+            model,
+            system,
+            message,
+            max_tokens,
+        } => {
+            let base = args.gateway_url.trim_end_matches('/').to_string();
+            chat::run_chat(&client, &base, token.as_ref(), model, system, message, max_tokens)
+                .await?;
+        }
+        Command::Scale { id, replicas } => {
+            let url = format!(
+                "{}/v1/admin/models/requests/{}/scale",
+                args.gateway_url.trim_end_matches('/'),
+                id
+            );
+            let body = serde_json::json!({ "replicas": replicas });
+            let resp = auth(client.put(&url), token.as_ref())
+                .json(&body)
+                .send()
+                .await?;
+            if resp.status().is_success() {
+                println!("✓ Scaled request '{}' to {} replicas", id, replicas);
+            } else {
+                eprintln!("✗ Failed to scale: {}", resp.text().await?);
+            }
+        }
+        Command::Drain {
+            model_uid,
+            replica_id,
+        } => {
+            let url = format!(
+                "{}/v1/admin/endpoints/drain",
+                args.gateway_url.trim_end_matches('/')
+            );
+            let body = serde_json::json!({
+                "model_uid": model_uid,
+                "replica_id": replica_id
+            });
+            let resp = auth(client.post(&url), token.as_ref())
+                .json(&body)
+                .send()
+                .await?;
+            if resp.status().is_success() {
+                println!(
+                    "✓ Draining endpoint {}/replica-{}",
+                    model_uid, replica_id
+                );
+            } else {
+                eprintln!("✗ Failed to drain: {}", resp.text().await?);
+            }
         }
     }
 

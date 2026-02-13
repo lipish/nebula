@@ -2,7 +2,7 @@
 
 ## 1. 现状概览
 - 控制面与执行面链路已打通：动态模型加载、调度、Node 多进程多模型、Embeddings、CLI 基础管理能力（list/load/unload/status）。
-- 仍缺：鉴权与 RBAC、可观测性基线（统一日志/指标/追踪）、容量感知调度、多 GPU 自动管理、一键部署、Web Console/后台服务、CLI 完备度（chat/logs/metrics/drain/scale）。
+- 仍缺：可观测性基线（Prometheus /metrics 标准暴露）、一键部署（helm chart）、审计日志、多引擎抽象、镜像/模型文件管理。
 
 ## 2. 目标
 - 提供“可观测、可管控、可扩展”的生产级控制面：统一 Control API、鉴权、审计、可观测性、容量感知调度、友好管理体验（CLI + Web）。
@@ -16,8 +16,8 @@
    - 健康/容量信号：vLLM /health、GPU 显存与利用率、端口占用、plan_version 一致性。
    - CLI 增补 `metrics`、`tail-logs` 便捷查看；为前端预留同一数据源。
 3) **CLI 能力补全**（高优先级）
-   - 新增：`chat`、`logs`、`metrics`、`drain`（节点/端点下线与迁移）、`scale`（副本调整）、`whoami`/`auth login`。
-   - 支持多集群上下文配置、模板化/批量操作。
+   - ✅ 已完成：`chat`（流式对话）、`logs`、`metrics`、`drain`（端点优雅下线）、`scale`（副本调整）、`whoami`。
+   - 待做：`--follow` 流式日志、多集群上下文配置、模板化/批量操作。
 4) **后台服务 + Web Console MVP**（中优先级）
    - 后台服务：轻量 Rust/Go，封装 Control API，内置 auth/RBAC/审计，供 CLI 与前端共用。
    - Web Console：总览（节点/模型/端点健康）、模型生命周期操作、事件与审计流、基础日志/metrics 视图（可链接 Grafana/Tempo/Loki）。
@@ -96,7 +96,7 @@
 - **Control API 定义**：补全模型/端点/节点/审计对象的 protobuf + OpenAPI；统一错误码与幂等语义；补充拒绝/限流场景的返回格式。
 - **鉴权与 RBAC**：Gateway/Router 引入 API key/JWT 中间件；meta 存储/下发用户与角色映射；CLI 增加 `auth login`、`whoami`、`--token` 支持；提供示例策略（viewer/operator/admin）。
 - **可观测性基线**：各组件暴露指标（请求 QPS/latency、队列长度、调度结果、节点 GPU 内存/利用率）；统一 JSON 日志字段（trace_id/request_id/model/node/endpoint/version）；trace 通过 x-request-id 透传；提供 sample Grafana/Tempo/Loki 配置。
-- **CLI 能力**：实现 `metrics`（PromQL 直连或 proxy）、`tail-logs`（Loki/文件流式）、`chat`（走 Gateway）、`logs/metrics` 支持 --follow 与过滤；完善 `status/list` 输出（plan_version、健康信号）。
+- **CLI 能力**：✅ `metrics`、`logs`、`chat`（流式对话，支持交互/单次模式）、`drain`（端点优雅下线）、`scale`（副本调整）、`whoami` 已完成。待做：`--follow` 流式日志、过滤。
 - **测试与验收**：E2E 用例覆盖鉴权（通过/拒绝）、指标暴露、日志格式、CLI 新子命令；回归基础模型加载/推理；准备最小化 demo 配置用于演示。
 
 ## 9. 控制面优化路线（借鉴 AIBrix）
@@ -119,7 +119,7 @@
 | **4.3 Docker 容器管理** | 容器复用（Node 重启不杀容器）、正确停止（docker stop）、端口竞争修复 | 1 天 | 无 | ✅ 已完成 |
 | **4.4 容器资产感知** | Node HTTP API 暴露容器/镜像信息（/api/containers, /api/images），BFF 按需拉取 | 0.5 天 | 无 | ✅ 已完成 |
 | **5.1 Admission Control** | 所有 endpoint 过载时返回 429 + Retry-After | 1 天 | 1.1 | ✅ 已完成 |
-| **6.1 可观测性** | 各组件暴露 Prometheus /metrics，日志接入 Loki，Tracing 接入 Jaeger | 3 天 | 无 | |
+| **6.1 可观测性** | 各组件暴露 Prometheus /metrics，日志接入 Loki，Tracing 接入 Jaeger | 3 天 | 无 | 部分（xtrace 集成 ✅，Prometheus /metrics 待补） |
 
 ### 建议融入时间线
 
