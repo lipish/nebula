@@ -100,18 +100,19 @@ async fn main() -> anyhow::Result<()> {
 
     let metrics = Arc::new(metrics::Metrics::default());
 
+    let auth = nebula_common::auth::parse_auth_from_env();
+
     let st = AppState {
         model_uid: args.model_uid,
         router,
         http,
         plan_version,
         metrics,
+        auth,
     };
 
-    let app = Router::new()
-        .route("/healthz", get(healthz))
-        .route("/health", get(healthz))
-        .route("/metrics", get(metrics_handler))
+    // Routes that require auth (inference endpoints)
+    let authed_routes = Router::new()
         .route("/v1/chat/completions", post(proxy_chat_completions))
         .route("/v1/completions", post(proxy_chat_completions))
         .route("/v1/embeddings", post(proxy_chat_completions))
@@ -120,6 +121,19 @@ async fn main() -> anyhow::Result<()> {
             "/v1/models",
             post(proxy_chat_completions).get(proxy_chat_completions),
         )
+        .layer(middleware::from_fn_with_state(
+            st.clone(),
+            nebula_common::auth::auth_middleware::<AppState>,
+        ));
+
+    // Routes that do NOT require auth (health/metrics)
+    let public_routes = Router::new()
+        .route("/healthz", get(healthz))
+        .route("/health", get(healthz))
+        .route("/metrics", get(metrics_handler));
+
+    let app = public_routes
+        .merge(authed_routes)
         .layer(middleware::from_fn_with_state(st.clone(), track_requests))
         .with_state(st);
 
