@@ -33,6 +33,10 @@ pub struct Router {
     stats: DashMap<(String, u32), EndpointStats>,
     session_affinity: DashMap<String, (String, u32)>,
     strategy: Box<dyn RoutingStrategy>,
+    /// model_name → model_uid (e.g. "Qwen/Qwen2.5-0.5B-Instruct" → "qwen2_5_0_5b")
+    model_names: DashMap<String, String>,
+    /// model_uid → model_name (reverse mapping)
+    model_uids_to_names: DashMap<String, String>,
 }
 
 impl std::fmt::Debug for Router {
@@ -55,6 +59,8 @@ impl Router {
             stats: DashMap::new(),
             session_affinity: DashMap::new(),
             strategy,
+            model_names: DashMap::new(),
+            model_uids_to_names: DashMap::new(),
         })
     }
 
@@ -87,6 +93,36 @@ impl Router {
 
     pub fn clear_session_affinity(&self, session_id: &str) {
         self.session_affinity.remove(session_id);
+    }
+
+    /// Register a bidirectional model_uid ↔ model_name mapping.
+    pub fn set_model_mapping(&self, model_uid: &str, model_name: &str) {
+        self.model_names
+            .insert(model_name.to_string(), model_uid.to_string());
+        self.model_uids_to_names
+            .insert(model_uid.to_string(), model_name.to_string());
+    }
+
+    /// Resolve an input model string to a model_uid.
+    /// If `input` is already a known model_uid, return it as-is.
+    /// Otherwise, check if it's a known model_name and return the mapped model_uid.
+    /// Falls back to returning the input unchanged.
+    pub fn resolve_model(&self, input: &str) -> String {
+        // Already a known model_uid?
+        if self.model_uids_to_names.contains_key(input) {
+            return input.to_string();
+        }
+        // Known model_name → model_uid?
+        if let Some(uid) = self.model_names.get(input) {
+            return uid.value().clone();
+        }
+        // Fallback: return as-is
+        input.to_string()
+    }
+
+    /// Get the user-facing model_name for a given model_uid.
+    pub fn get_model_name(&self, model_uid: &str) -> Option<String> {
+        self.model_uids_to_names.get(model_uid).map(|v| v.value().clone())
     }
 
     /// Collect all stats as a slice snapshot (for admission control, etc.).

@@ -49,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
     let store_for_placement = store.clone();
     let model_uid_for_placement = args.model_uid.clone();
     let plan_version_for_placement = plan_version.clone();
+    let router_for_placement = router.clone();
 
     tokio::spawn(async move {
         if let Err(e) = endpoints_sync_loop(store_for_endpoints, router_for_sync).await {
@@ -61,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
             store_for_placement,
             model_uid_for_placement,
             plan_version_for_placement,
+            router_for_placement,
         )
         .await
         {

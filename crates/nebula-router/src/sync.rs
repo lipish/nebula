@@ -62,22 +62,28 @@ pub async fn placement_sync_loop(
     store: EtcdMetaStore,
     model_uid: String,
     plan_version: Arc<AtomicU64>,
+    router: Arc<nebula_router::Router>,
 ) -> anyhow::Result<()> {
-    let key = format!("/placements/{model_uid}");
     loop {
-        match store.get(&key).await {
-            Ok(Some((bytes, _rev))) => {
-                if let Ok(plan) = serde_json::from_slice::<PlacementPlan>(&bytes) {
-                    if plan.model_uid == model_uid {
-                        plan_version.store(plan.version, Ordering::Relaxed);
+        // Initial load: list ALL placements and populate model mappings
+        let mut found_primary = false;
+        match store.list_prefix("/placements/").await {
+            Ok(items) => {
+                for (_k, v, _rev) in items {
+                    if let Ok(plan) = serde_json::from_slice::<PlacementPlan>(&v) {
+                        router.set_model_mapping(&plan.model_uid, &plan.model_name);
+                        if plan.model_uid == model_uid {
+                            plan_version.store(plan.version, Ordering::Relaxed);
+                            found_primary = true;
+                        }
                     }
                 }
-            }
-            Ok(None) => {
-                plan_version.store(0, Ordering::Relaxed);
+                if !found_primary {
+                    plan_version.store(0, Ordering::Relaxed);
+                }
             }
             Err(e) => {
-                tracing::warn!(error=%e, "failed to get placement, will retry");
+                tracing::warn!(error=%e, "failed to list placements, will retry");
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 continue;
             }
@@ -98,10 +104,12 @@ pub async fn placement_sync_loop(
             let Ok(plan) = serde_json::from_slice::<PlacementPlan>(&v) else {
                 continue;
             };
-            if plan.model_uid != model_uid {
-                continue;
+            // Always update model mappings for every placement
+            router.set_model_mapping(&plan.model_uid, &plan.model_name);
+            // Update plan_version only for the primary model
+            if plan.model_uid == model_uid {
+                plan_version.store(plan.version, Ordering::Relaxed);
             }
-            plan_version.store(plan.version, Ordering::Relaxed);
         }
 
         tracing::warn!("placements watch stream ended, reconnecting");

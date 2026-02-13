@@ -95,7 +95,7 @@ pub async fn proxy_chat_completions(
                 Err(_) => return (StatusCode::BAD_REQUEST, "invalid body").into_response(),
             };
 
-            let model_uid =
+            let raw_model =
                 if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
                     json.get("model")
                         .and_then(|m| m.as_str())
@@ -104,6 +104,22 @@ pub async fn proxy_chat_completions(
                 } else {
                     st.model_uid.clone()
                 };
+
+            // Resolve model_name → model_uid (or pass through if already a uid)
+            let model_uid = st.router.resolve_model(&raw_model);
+
+            // Rewrite the body's "model" field to model_name so vLLM sees the
+            // HuggingFace model name it expects (e.g. "Qwen/Qwen2.5-0.5B-Instruct")
+            let body_bytes = {
+                let model_name = st.router.get_model_name(&model_uid)
+                    .unwrap_or_else(|| raw_model.clone());
+                if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+                    json["model"] = serde_json::Value::String(model_name);
+                    Bytes::from(serde_json::to_vec(&json).unwrap_or_else(|_| body_bytes.to_vec()))
+                } else {
+                    body_bytes
+                }
+            };
 
             (reqwest::Method::POST, Some(body_bytes), model_uid)
         }
