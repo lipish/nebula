@@ -1393,12 +1393,14 @@ dependencies = [
 name = "nebula-common"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "opentelemetry 0.27.1",
  "opentelemetry-otlp",
  "opentelemetry_sdk 0.27.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
