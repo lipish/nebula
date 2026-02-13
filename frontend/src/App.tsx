@@ -25,14 +25,6 @@ const EMPTY_OVERVIEW: ClusterStatus = {
 
 type Page = 'dashboard' | 'models' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images'
 
-const statusVariant = (s: string): 'default' | 'outline' | 'secondary' | 'destructive' => {
-  const n = s.toLowerCase()
-  if (n.includes('fail')) return 'destructive'
-  if (n.includes('unload') || n.includes('loading')) return 'outline'
-  if (n.includes('run') || n.includes('ready')) return 'default'
-  return 'secondary'
-}
-
 const fmtTime = (v: number) => (v ? new Date(v).toLocaleString() : 'n/a')
 
 const pct = (used: number, total: number) =>
@@ -42,7 +34,7 @@ function App() {
   const [token, setToken] = useState(() => localStorage.getItem('nebula_token') || '')
   const [overview, setOverview] = useState<ClusterStatus>(EMPTY_OVERVIEW)
   const [requests, setRequests] = useState<ModelRequest[]>([])
-  const [loading, setLoading] = useState(false)
+  const [, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState<Page>('dashboard')
   const [showLoadDialog, setShowLoadDialog] = useState(false)

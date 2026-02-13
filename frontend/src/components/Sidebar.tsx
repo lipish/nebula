@@ -32,7 +32,7 @@ const generalItems = [
     { icon: MessageSquare, label: "Feedback" },
 ];
 
-const Sidebar = ({ page, setPage, clusterHealthy }: SidebarProps) => {
+const Sidebar = ({ page, setPage }: SidebarProps) => {
     const [moreOpen, setMoreOpen] = useState(false);
     return (
         <aside className="fixed left-0 top-0 h-screen w-64 bg-card border-r border-border flex flex-col">
