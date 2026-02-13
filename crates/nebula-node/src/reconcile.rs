@@ -1,23 +1,23 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
-use tokio::process::Child;
 use tokio::sync::Mutex;
 
 use nebula_common::{EndpointInfo, EndpointKind, EndpointStatus, ModelRequest, ModelRequestStatus, PlacementPlan};
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
 use crate::args::Args;
-use crate::engine::{start_vllm, stop_docker_container, try_reuse_container, write_engine_env};
+use crate::engine::{write_engine_env, Engine, EngineHandle, EngineStartContext};
 use crate::heartbeat::{delete_endpoint, register_endpoint};
-use crate::util::{now_ms, stop_child};
+use crate::util::now_ms;
 
 pub struct RunningModel {
     pub model_uid: String,
     pub replica_id: u32,
     pub plan_version: u64,
-    pub base_url: String,
-    pub child: Child,
+    pub handle: EngineHandle,
+    pub engine: Arc<dyn Engine>,
 }
 
 async fn mark_request_failed(store: &EtcdMetaStore, request_id: &str, reason: String) {
@@ -52,17 +52,12 @@ pub async fn reconcile_model(
     model_uid: &str,
     plan: Option<PlacementPlan>,
 ) -> anyhow::Result<()> {
-    let is_docker = args.vllm_docker_image.is_some();
-
     let plan = match plan {
         Some(p) => p,
         None => {
             if let Some(mut rm) = running.remove(model_uid) {
                 tracing::info!(%model_uid, "stopping engine");
-                if is_docker {
-                    stop_docker_container(&rm.model_uid, rm.replica_id).await;
-                }
-                stop_child(&mut rm.child).await;
+                rm.engine.stop(&mut rm.handle).await?;
                 let _ = delete_endpoint(store, &rm.model_uid, rm.replica_id).await;
                 endpoint_state.lock().await.remove(model_uid);
             }
@@ -75,10 +70,7 @@ pub async fn reconcile_model(
     let Some(assignment) = desired else {
         if let Some(mut rm) = running.remove(model_uid) {
             tracing::info!(%model_uid, "no longer assigned, stopping engine");
-            if is_docker {
-                stop_docker_container(&rm.model_uid, rm.replica_id).await;
-            }
-            stop_child(&mut rm.child).await;
+            rm.engine.stop(&mut rm.handle).await?;
             let _ = delete_endpoint(store, &rm.model_uid, rm.replica_id).await;
             endpoint_state.lock().await.remove(model_uid);
         }
@@ -96,72 +88,45 @@ pub async fn reconcile_model(
 
     if let Some(mut rm) = running.remove(model_uid) {
         tracing::info!(%model_uid, "restarting engine due to placement update");
-        if is_docker {
-            stop_docker_container(&rm.model_uid, rm.replica_id).await;
-        }
-        stop_child(&mut rm.child).await;
+        rm.engine.stop(&mut rm.handle).await?;
         let _ = delete_endpoint(store, &rm.model_uid, rm.replica_id).await;
         endpoint_state.lock().await.remove(model_uid);
     }
 
-    // In Docker mode, try to reuse an existing healthy container before creating a new one.
-    // This avoids cold-starting the engine when only the Node process restarts.
-    if is_docker {
-        let timeout = std::time::Duration::from_secs(args.ready_timeout_secs);
-        if let Some((base_url, engine_model)) = try_reuse_container(model_uid, assignment.replica_id, timeout).await {
-            write_engine_env(&args.engine_env_path, &base_url, &engine_model).await?;
+    // Create engine instance based on assignment's engine_type
+    let engine_type = assignment.engine_type.as_deref();
+    let engine: Arc<dyn Engine> = Arc::from(crate::engine::create_engine(args, engine_type));
 
-            let info = EndpointInfo {
-                model_uid: plan.model_uid.clone(),
-                replica_id: assignment.replica_id,
-                plan_version: plan.version,
-                node_id: args.node_id.clone(),
-                endpoint_kind: EndpointKind::NativeHttp,
-                api_flavor: "openai".to_string(),
-                status: EndpointStatus::Ready,
-                last_heartbeat_ms: now_ms(),
-                grpc_target: None,
-                base_url: Some(base_url.clone()),
-            };
+    let ctx = EngineStartContext {
+        model_uid: model_uid.to_string(),
+        model_name: plan.model_name.clone(),
+        replica_id: assignment.replica_id,
+        port: assignment.port,
+        gpu_indices: assignment.effective_gpu_indices(),
+        engine_config_path: assignment.engine_config_path.clone(),
+        extra_args: assignment.extra_args.clone(),
+        ready_timeout: Duration::from_secs(args.ready_timeout_secs),
+    };
 
-            register_endpoint(store, &info, args.heartbeat_ttl_ms).await?;
-            tracing::info!(model_uid=%info.model_uid, replica_id=info.replica_id, base_url=%base_url, "registered endpoint (reused container)");
-
-            endpoint_state.lock().await.insert(model_uid.to_string(), info);
-            // For reused containers, we don't have a Child handle.
-            // Create a dummy by spawning a `docker wait` process that blocks until the container exits.
-            let cname = crate::engine::container_name(model_uid, assignment.replica_id);
-            let child = tokio::process::Command::new("docker")
-                .args(["wait", &cname])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
-
-            running.insert(
-                model_uid.to_string(),
-                RunningModel {
-                    model_uid: plan.model_uid,
-                    replica_id: assignment.replica_id,
-                    plan_version: plan.version,
-                    base_url,
-                    child,
-                },
-            );
-            return Ok(());
-        }
-    }
-
-    let (child, base_url, engine_model) = match start_vllm(args, assignment, model_uid, &plan.model_name).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::error!(%model_uid, error=%e, "failed to start vllm engine");
-            if let Some(request_id) = plan.request_id.as_deref() {
-                mark_request_failed(store, request_id, e.to_string()).await;
+    // Try to reuse an existing instance before starting a new one.
+    let handle = if let Some(h) = engine.try_reuse(&ctx).await {
+        tracing::info!(%model_uid, base_url=%h.base_url, engine=%engine.engine_type(), "reused existing engine instance");
+        h
+    } else {
+        tracing::info!(%model_uid, engine=%engine.engine_type(), "starting new engine instance");
+        match engine.start(ctx).await {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::error!(%model_uid, error=%e, engine=%engine.engine_type(), "failed to start engine");
+                if let Some(request_id) = plan.request_id.as_deref() {
+                    mark_request_failed(store, request_id, e.to_string()).await;
+                }
+                return Ok(());
             }
-            return Ok(());
         }
     };
-    write_engine_env(&args.engine_env_path, &base_url, &engine_model).await?;
+
+    write_engine_env(&args.engine_env_path, &handle.base_url, &handle.engine_model).await?;
 
     let info = EndpointInfo {
         model_uid: plan.model_uid.clone(),
@@ -173,11 +138,11 @@ pub async fn reconcile_model(
         status: EndpointStatus::Ready,
         last_heartbeat_ms: now_ms(),
         grpc_target: None,
-        base_url: Some(base_url.clone()),
+        base_url: Some(handle.base_url.clone()),
     };
 
     register_endpoint(store, &info, args.heartbeat_ttl_ms).await?;
-    tracing::info!(model_uid=%info.model_uid, replica_id=info.replica_id, base_url=%base_url, "registered endpoint");
+    tracing::info!(model_uid=%info.model_uid, replica_id=info.replica_id, base_url=%handle.base_url, "registered endpoint");
 
     endpoint_state
         .lock()
@@ -189,8 +154,8 @@ pub async fn reconcile_model(
             model_uid: plan.model_uid,
             replica_id: assignment.replica_id,
             plan_version: plan.version,
-            base_url: base_url.clone(),
-            child,
+            handle,
+            engine,
         },
     );
 

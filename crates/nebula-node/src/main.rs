@@ -4,7 +4,6 @@ mod engine;
 mod gpu;
 mod heartbeat;
 mod reconcile;
-mod scrape;
 mod util;
 
 use clap::Parser;

@@ -201,6 +201,7 @@ fn make_assignment(
         gpu_index,
         gpu_indices: gpu_indices_field,
         extra_args,
+        engine_type: None,
     }
 }
 

@@ -17,6 +17,10 @@ pub struct PlacementAssignment {
 
     #[serde(default)]
     pub extra_args: Option<Vec<String>>,
+
+    /// Engine type: "vllm", "sglang", etc. Defaults to "vllm" if absent.
+    #[serde(default)]
+    pub engine_type: Option<String>,
 }
 
 impl PlacementAssignment {

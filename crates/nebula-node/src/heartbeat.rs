@@ -8,10 +8,8 @@ use tokio::sync::Mutex;
 use nebula_common::{EndpointInfo, EndpointStatus, NodeStatus};
 use nebula_meta::{EtcdMetaStore, MetaStore};
 
-use crate::engine::container_name;
 use crate::gpu::read_gpu_statuses;
 use crate::reconcile::RunningModel;
-use crate::scrape::scrape_engine_stats;
 use crate::util::now_ms;
 
 /// Number of consecutive health-check failures before marking endpoint as Unhealthy.
@@ -155,11 +153,7 @@ pub async fn heartbeat_loop(
                     }
                 }
 
-                let health_url = format!("{}/health", rm.base_url);
-                let healthy = match http.get(&health_url).send().await {
-                    Ok(resp) => resp.status().is_success(),
-                    Err(_) => false,
-                };
+                let healthy = rm.engine.health_check(&rm.handle).await;
 
                 let count = fail_counts.entry(rm.model_uid.clone()).or_insert(0);
 
@@ -182,7 +176,7 @@ pub async fn heartbeat_loop(
 
                     // Scrape metrics only when healthy
                     if let Some(stats) =
-                        scrape_engine_stats(&http, &rm.base_url, &rm.model_uid, rm.replica_id).await
+                        rm.engine.scrape_stats(&http, &rm.handle, &rm.model_uid, rm.replica_id).await
                     {
                         // Collect engine stats for xtrace
                         if xtrace.is_some() {
@@ -248,14 +242,10 @@ pub async fn heartbeat_loop(
                         }
                     }
 
-                    // Attempt container restart after higher threshold
+                    // Attempt engine restart after higher threshold
                     if *count >= RESTART_THRESHOLD {
-                        let cname = container_name(&rm.model_uid, rm.replica_id);
-                        tracing::warn!(model_uid=%rm.model_uid, container=%cname, "attempting docker restart");
-                        let _ = tokio::process::Command::new("docker")
-                            .args(["restart", "-t", "10", &cname])
-                            .output()
-                            .await;
+                        tracing::warn!(model_uid=%rm.model_uid, "attempting engine restart");
+                        rm.engine.try_restart(&rm.handle).await;
                         // Keep count at 1 (not 0) so that recovery is detected after cooldown
                         *count = 1;
                         restart_at.insert(rm.model_uid.clone(), now_ms());

@@ -70,6 +70,44 @@ pub struct Args {
     #[arg(long)]
     pub vllm_hf_endpoint: Option<String>,
 
+    // ---- SGLang engine parameters ----
+
+    /// SGLang binary path (used in local binary mode).
+    #[arg(long, default_value = "python3 -m sglang.launch_server")]
+    pub sglang_bin: String,
+
+    /// Working directory for SGLang local binary mode.
+    #[arg(long, default_value = "/home/ai")]
+    pub sglang_cwd: String,
+
+    /// Host for SGLang to bind to.
+    #[arg(long, default_value = "0.0.0.0")]
+    pub sglang_host: String,
+
+    /// If set, launch SGLang via `docker run` using this image.
+    #[arg(long)]
+    pub sglang_docker_image: Option<String>,
+
+    /// Host path to mount as /model inside the SGLang container.
+    #[arg(long, default_value = "/DATA/Model")]
+    pub sglang_model_dir: String,
+
+    /// Tensor parallel size for SGLang.
+    #[arg(long)]
+    pub sglang_tensor_parallel_size: Option<u32>,
+
+    /// Data parallel size for SGLang.
+    #[arg(long)]
+    pub sglang_data_parallel_size: Option<u32>,
+
+    /// Memory fraction for SGLang (equivalent to --mem-fraction-static).
+    #[arg(long)]
+    pub sglang_mem_fraction: Option<f32>,
+
+    /// Max number of running requests for SGLang.
+    #[arg(long)]
+    pub sglang_max_running_requests: Option<u32>,
+
     /// Port for the Node HTTP API (containers, images, etc.).
     #[arg(long, default_value_t = 9090)]
     pub api_port: u16,
