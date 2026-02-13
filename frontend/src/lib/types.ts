@@ -122,3 +122,144 @@ export interface NodeImageStatus {
   error?: string | null
   updated_at_ms: number
 }
+
+// ---------------------------------------------------------------------------
+// v2 API types
+// ---------------------------------------------------------------------------
+
+export type AggregatedModelState = 'stopped' | 'downloading' | 'starting' | 'running' | 'degraded' | 'failed' | 'stopping'
+
+export interface ReplicaCount {
+  desired: number
+  ready: number
+  unhealthy: number
+}
+
+export interface ModelView {
+  model_uid: string
+  model_name: string
+  engine_type: string | null
+  state: AggregatedModelState
+  replicas: ReplicaCount
+  endpoints: EndpointInfo[]
+  labels: Record<string, string>
+  created_at_ms: number
+  updated_at_ms: number
+}
+
+export interface DownloadProgress {
+  model_uid: string
+  replica_id: number
+  node_id: string
+  model_name: string
+  phase: 'downloading' | 'verifying' | 'complete' | 'failed'
+  total_bytes: number
+  downloaded_bytes: number
+  file_count: number
+  files_done: number
+  updated_at_ms: number
+}
+
+export interface DownloadProgressView {
+  replicas: DownloadProgress[]
+}
+
+export interface CacheStatusView {
+  cached_on_nodes: string[]
+  total_size_bytes: number
+}
+
+export interface ModelDetailView {
+  model_uid: string
+  model_name: string
+  engine_type: string | null
+  state: AggregatedModelState
+  replicas: ReplicaCount
+  labels: Record<string, string>
+  created_at_ms: number
+  updated_at_ms: number
+  spec: ModelSpec
+  deployment: ModelDeployment | null
+  placement: PlacementPlan | null
+  endpoints: EndpointInfo[]
+  stats: EndpointStats[]
+  download_progress: DownloadProgressView | null
+  cache_status: CacheStatusView | null
+}
+
+export interface ModelSpec {
+  model_uid: string
+  model_name: string
+  model_source: 'hugging_face' | 'model_scope' | 'local'
+  model_path?: string | null
+  engine_type?: string | null
+  docker_image?: string | null
+  config?: ModelConfig | null
+  labels: Record<string, string>
+  created_at_ms: number
+  updated_at_ms: number
+  created_by?: string | null
+}
+
+export interface ModelDeployment {
+  model_uid: string
+  desired_state: 'running' | 'stopped'
+  replicas: number
+  min_replicas?: number | null
+  max_replicas?: number | null
+  node_affinity?: string | null
+  gpu_affinity?: number[] | null
+  config_overrides?: ModelConfig | null
+  version: number
+  updated_at_ms: number
+}
+
+export interface ModelTemplate {
+  template_id: string
+  name: string
+  description?: string | null
+  category?: 'llm' | 'embedding' | 'rerank' | 'vlm' | 'audio' | null
+  model_name: string
+  model_source?: 'hugging_face' | 'model_scope' | 'local' | null
+  engine_type?: string | null
+  docker_image?: string | null
+  config?: ModelConfig | null
+  default_replicas: number
+  labels: Record<string, string>
+  source: 'system' | 'user' | 'saved'
+  created_at_ms: number
+  updated_at_ms: number
+}
+
+export interface ModelCacheEntry {
+  node_id: string
+  model_name: string
+  cache_path: string
+  size_bytes: number
+  file_count: number
+  complete: boolean
+  last_accessed_ms: number
+  discovered_at_ms: number
+}
+
+export interface NodeDiskStatus {
+  node_id: string
+  model_dir: string
+  total_bytes: number
+  used_bytes: number
+  available_bytes: number
+  usage_pct: number
+  model_cache_bytes: number
+  model_count: number
+  updated_at_ms: number
+}
+
+export interface DiskAlert {
+  node_id: string
+  alert_type: 'disk_warning' | 'disk_critical'
+  message: string
+  model_dir: string
+  usage_pct: number
+  available_bytes: number
+  created_at_ms: number
+}

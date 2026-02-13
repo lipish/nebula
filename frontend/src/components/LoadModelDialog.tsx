@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Search, ArrowLeft, ArrowRight, Download, Heart, Tag, Cpu, Server, Loader2, Sparkles, AlertTriangle, Check } from "lucide-react"
+import { Search, ArrowLeft, ArrowRight, Download, Heart, Tag, Cpu, Server, Loader2, Sparkles, AlertTriangle, Check, LayoutTemplate } from "lucide-react"
 import {
     Dialog,
     DialogContent,
@@ -12,10 +12,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { apiGet, apiGetWithParams } from "@/lib/api"
-import type { ClusterStatus, EngineImage, ModelLoadRequest, ModelSearchResult } from "@/lib/types"
+import { apiGet, apiGetWithParams, v2 } from "@/lib/api"
+import type { ClusterStatus, EngineImage, ModelLoadRequest, ModelSearchResult, ModelTemplate } from "@/lib/types"
 
-type Step = "search" | "configure"
+type Step = "search" | "configure" | "templates"
 type Source = "huggingface" | "modelscope"
 
 interface PopularModel {
@@ -102,6 +102,9 @@ export function LoadModelDialog({
     const [selectedNode, setSelectedNode] = useState<string | null>(null)
     const [selectedGpuIndices, setSelectedGpuIndices] = useState<Set<number>>(new Set())
     const [engineImages, setEngineImages] = useState<EngineImage[]>([])
+    const [templates, setTemplates] = useState<ModelTemplate[]>([])
+    const [loadingTemplates, setLoadingTemplates] = useState(false)
+    const [deployingTemplate, setDeployingTemplate] = useState<string | null>(null)
 
     const requestIdByModelUid = (() => {
         const m = new Map<string, string>()
@@ -192,6 +195,16 @@ export function LoadModelDialog({
         apiGet<EngineImage[]>("/admin/images", token)
             .then(setEngineImages)
             .catch(() => setEngineImages([]))
+    }, [open, token])
+
+    // Fetch templates when dialog opens
+    useEffect(() => {
+        if (!open) return
+        setLoadingTemplates(true)
+        v2.listTemplates(token)
+            .then(setTemplates)
+            .catch(() => setTemplates([]))
+            .finally(() => setLoadingTemplates(false))
     }, [open, token])
 
     const imagesForEngine = engineImages.filter(img => img.engine_type === (form.engine_type ?? "vllm"))
@@ -294,12 +307,14 @@ export function LoadModelDialog({
             <DialogContent className="max-w-2xl h-[70vh] flex flex-col overflow-hidden rounded-2xl">
                 <DialogHeader>
                     <DialogTitle className="text-xl font-bold">
-                        {step === "search" ? "Search & Select Model" : "Configure Deployment"}
+                        {step === "search" ? "Search & Select Model" : step === "templates" ? "Deploy from Template" : "Configure Deployment"}
                     </DialogTitle>
                     <DialogDescription>
                         {step === "search"
                             ? "Search models from HuggingFace or ModelScope"
-                            : `Deploy ${selectedModel?.id ?? form.model_name}`}
+                            : step === "templates"
+                                ? "Choose a pre-configured template to deploy"
+                                : `Deploy ${selectedModel?.id ?? form.model_name}`}
                     </DialogDescription>
                 </DialogHeader>
 
@@ -447,8 +462,8 @@ export function LoadModelDialog({
                             ))}
                         </div>
 
-                        {/* Manual entry fallback */}
-                        <div className="border-t border-border/50 pt-3">
+                        {/* Manual entry + templates fallback */}
+                        <div className="border-t border-border/50 pt-3 flex items-center justify-between">
                             <button
                                 onClick={() => {
                                     setSelectedModel(null)
@@ -458,7 +473,96 @@ export function LoadModelDialog({
                             >
                                 Or enter model path manually →
                             </button>
+                            <button
+                                onClick={() => setStep("templates")}
+                                className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary/80 transition-colors"
+                            >
+                                <LayoutTemplate className="h-3.5 w-3.5" />
+                                From Template
+                            </button>
                         </div>
+                    </div>
+                )}
+
+                {step === "templates" && (
+                    <div className="flex flex-col gap-4 flex-1 min-h-0">
+                        <button
+                            onClick={() => setStep("search")}
+                            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
+                        >
+                            <ArrowLeft className="h-3.5 w-3.5" /> Back to search
+                        </button>
+                        <div className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1">
+                            {loadingTemplates && (
+                                <div className="flex items-center justify-center py-12 text-muted-foreground">
+                                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                                    <span className="text-sm">Loading templates...</span>
+                                </div>
+                            )}
+                            {!loadingTemplates && templates.length === 0 && (
+                                <div className="text-center py-12 text-muted-foreground text-sm">
+                                    No templates available yet.
+                                </div>
+                            )}
+                            {!loadingTemplates && (() => {
+                                const grouped = new Map<string, ModelTemplate[]>()
+                                for (const t of templates) {
+                                    const cat = t.category ?? "other"
+                                    if (!grouped.has(cat)) grouped.set(cat, [])
+                                    grouped.get(cat)!.push(t)
+                                }
+                                return Array.from(grouped.entries()).map(([cat, items]) => (
+                                    <div key={cat}>
+                                        <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+                                            {cat}
+                                        </h4>
+                                        <div className="space-y-1.5">
+                                            {items.map((tmpl) => (
+                                                <button
+                                                    key={tmpl.template_id}
+                                                    disabled={deployingTemplate !== null}
+                                                    onClick={async () => {
+                                                        setDeployingTemplate(tmpl.template_id)
+                                                        try {
+                                                            await v2.deployTemplate(tmpl.template_id, {}, token)
+                                                            onOpenChange(false)
+                                                        } catch (err) {
+                                                            setSearchError(err instanceof Error ? err.message : "Deploy failed")
+                                                        } finally {
+                                                            setDeployingTemplate(null)
+                                                        }
+                                                    }}
+                                                    className="w-full text-left rounded-xl border border-border p-3 hover:border-primary/40 hover:bg-accent/30 transition-all group disabled:opacity-50"
+                                                >
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm font-bold text-foreground">{tmpl.name}</p>
+                                                            <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">{tmpl.model_name}</p>
+                                                            {tmpl.description && (
+                                                                <p className="text-[11px] text-muted-foreground mt-1">{tmpl.description}</p>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-2 shrink-0">
+                                                            {tmpl.engine_type && (
+                                                                <Badge variant="secondary" className="text-[9px]">{tmpl.engine_type}</Badge>
+                                                            )}
+                                                            {deployingTemplate === tmpl.template_id ? (
+                                                                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                                            ) : (
+                                                                <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))
+                            })()}
+                        </div>
+                        {searchError && (
+                            <p className="text-destructive text-sm">{searchError}</p>
+                        )}
                     </div>
                 )}
 

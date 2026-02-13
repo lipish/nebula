@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Monitor, Search, Thermometer, Cpu, Activity } from "lucide-react"
+import { Monitor, Search, Thermometer, Cpu, Activity, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import {
@@ -8,8 +8,8 @@ import {
 import {
     BarChart, Bar, LineChart, Line, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Tooltip, Legend,
 } from "recharts"
-import { apiGet } from "@/lib/api"
-import type { ClusterStatus, EndpointStats } from "@/lib/types"
+import { apiGet, v2 } from "@/lib/api"
+import type { ClusterStatus, DiskAlert, EndpointStats } from "@/lib/types"
 
 interface DashboardProps {
     overview: ClusterStatus
@@ -40,6 +40,14 @@ function greeting(): string {
 
 export function DashboardView({ overview, counts, gpuStats, pct, engineStats, token }: DashboardProps) {
     const gpuUsagePct = gpuStats.count > 0 ? pct(gpuStats.used, gpuStats.total) : 0
+
+    // Disk alerts from v2
+    const [diskAlerts, setDiskAlerts] = useState<DiskAlert[]>([])
+    useEffect(() => {
+        v2.listAlerts(token)
+            .then(setDiskAlerts)
+            .catch(() => setDiskAlerts([]))
+    }, [token])
 
     // GPU utilization trend data from xtrace
     const [gpuTrend, setGpuTrend] = useState<{ time: string; utilization: number; temperature: number }[]>([])
@@ -185,6 +193,29 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
                     <p className="text-sm text-muted-foreground mt-1">Here's an overview of your cluster health and active models</p>
                 </div>
             </div>
+
+            {/* Disk alert banners */}
+            {diskAlerts.length > 0 && (
+                <div className="space-y-2">
+                    {diskAlerts.map((alert, i) => {
+                        const isCritical = alert.alert_type === "disk_critical"
+                        return (
+                            <div key={i} className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm ${
+                                isCritical
+                                    ? "bg-destructive/10 text-destructive border border-destructive/20"
+                                    : "bg-yellow-500/10 text-yellow-700 border border-yellow-500/20"
+                            }`}>
+                                <AlertTriangle className="h-4 w-4 shrink-0" />
+                                <span className="font-medium">{alert.node_id}:</span>
+                                <span>{alert.message}</span>
+                                <Badge variant={isCritical ? "destructive" : "warning"} className="ml-auto text-[10px]">
+                                    {isCritical ? "critical" : "warning"}
+                                </Badge>
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
 
             {/* Summary Cards Row */}
             <div className="grid grid-cols-4 gap-4">

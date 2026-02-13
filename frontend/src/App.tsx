@@ -9,6 +9,7 @@ import { LoadModelDialog } from '@/components/LoadModelDialog'
 // Views
 import { DashboardView } from '@/components/views/dashboard'
 import { ModelsView } from '@/components/views/models'
+import { ModelDetailView_Page } from '@/components/views/model-detail'
 import { NodesView } from '@/components/views/nodes'
 import { SettingsView } from '@/components/views/settings'
 import { InferenceView } from '@/components/views/inference'
@@ -23,7 +24,7 @@ const EMPTY_OVERVIEW: ClusterStatus = {
   model_requests: [],
 }
 
-type Page = 'dashboard' | 'models' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images'
+type Page = 'dashboard' | 'models' | 'model-detail' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images'
 
 const fmtTime = (v: number) => (v ? new Date(v).toLocaleString() : 'n/a')
 
@@ -33,11 +34,12 @@ const pct = (used: number, total: number) =>
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem('nebula_token') || '')
   const [overview, setOverview] = useState<ClusterStatus>(EMPTY_OVERVIEW)
-  const [requests, setRequests] = useState<ModelRequest[]>([])
+  const [, setRequests] = useState<ModelRequest[]>([])
   const [, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState<Page>('dashboard')
   const [showLoadDialog, setShowLoadDialog] = useState(false)
+  const [selectedModelUid, setSelectedModelUid] = useState<string | null>(null)
   const [metricsRaw, setMetricsRaw] = useState('')
   const [engineStats, setEngineStats] = useState<EndpointStats[]>([])
 
@@ -175,12 +177,13 @@ function App() {
         {page === 'models' && (
           <>
             <ModelsView
-              requests={requests}
-              endpoints={overview.endpoints}
+              token={token}
               onOpenLoadDialog={() => setShowLoadDialog(true)}
-              handleUnload={handleUnload}
-              fmtTime={fmtTime}
               onNavigate={(p) => setPage(p as Page)}
+              onSelectModel={(uid) => {
+                setSelectedModelUid(uid)
+                setPage('model-detail')
+              }}
             />
             <LoadModelDialog
               open={showLoadDialog}
@@ -193,6 +196,16 @@ function App() {
               onUnloadRequestId={handleUnload}
             />
           </>
+        )}
+        {page === 'model-detail' && selectedModelUid && (
+          <ModelDetailView_Page
+            modelUid={selectedModelUid}
+            token={token}
+            onBack={() => {
+              setSelectedModelUid(null)
+              setPage('models')
+            }}
+          />
         )}
         {page === 'nodes' && (
           <NodesView
