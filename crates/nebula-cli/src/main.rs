@@ -9,12 +9,26 @@ use clap::Parser;
 use futures_util::StreamExt;
 use reqwest::Client;
 
-use nebula_common::{ClusterStatus, ModelLoadRequest, ModelRequest};
+use nebula_common::{ClusterStatus, ModelLoadRequest};
 
-use crate::args::{Args, ClusterCommand, Command, ModelCommand};
+use crate::args::{
+    Args, CacheCommand, ClusterCommand, Command, DiskCommand, ModelCommand, TemplateCommand,
+};
 use crate::client::auth;
 use crate::config::build_config;
-use crate::output::{print_cluster_status, print_model_requests};
+use crate::output::{
+    print_cache_summary, print_cluster_status, print_disk_status, print_model_detail_v2,
+    print_models_v2, print_node_cache, print_templates,
+};
+
+/// Build a v2 API URL from the gateway base URL.
+fn v2_url(gateway_url: &str, path: &str) -> String {
+    format!(
+        "{}/v1/admin/v2{}",
+        gateway_url.trim_end_matches('/'),
+        path
+    )
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -39,17 +53,115 @@ async fn main() -> Result<()> {
         },
         Command::Model { subcommand } => match subcommand {
             ModelCommand::List => {
-                let url = format!(
-                    "{}/v1/admin/models/requests",
-                    args.gateway_url.trim_end_matches('/')
-                );
-                let requests: Vec<ModelRequest> = auth(client.get(&url), token.as_ref())
-                    .send()
-                    .await?
-                    .json()
-                    .await?;
-                print_model_requests(requests);
+                let url = v2_url(&args.gateway_url, "/models");
+                let resp = auth(client.get(&url), token.as_ref()).send().await?;
+                if resp.status().is_success() {
+                    let models: Vec<serde_json::Value> = resp.json().await?;
+                    print_models_v2(&models);
+                } else {
+                    eprintln!("✗ Failed to list models: {}", resp.text().await?);
+                }
             }
+            ModelCommand::Get { model_uid } => {
+                let url = v2_url(&args.gateway_url, &format!("/models/{}", model_uid));
+                let resp = auth(client.get(&url), token.as_ref()).send().await?;
+                if resp.status().is_success() {
+                    let model: serde_json::Value = resp.json().await?;
+                    print_model_detail_v2(&model);
+                } else {
+                    eprintln!("✗ Failed to get model: {}", resp.text().await?);
+                }
+            }
+            ModelCommand::Create {
+                name,
+                uid,
+                engine,
+                source,
+                start,
+                replicas,
+            } => {
+                let url = v2_url(&args.gateway_url, "/models");
+                let mut body = serde_json::json!({
+                    "model_name": name,
+                    "engine_type": engine,
+                    "source": source,
+                    "start": start,
+                });
+                if let Some(u) = &uid {
+                    body["model_uid"] = serde_json::json!(u);
+                }
+                if start {
+                    body["replicas"] = serde_json::json!(replicas);
+                }
+                let resp = auth(client.post(&url), token.as_ref())
+                    .json(&body)
+                    .send()
+                    .await?;
+                if resp.status().is_success() {
+                    println!("✓ Model created: '{}'", name);
+                    println!("{}", resp.text().await?);
+                } else {
+                    eprintln!("✗ Failed to create model: {}", resp.text().await?);
+                }
+            }
+            ModelCommand::Start {
+                model_uid,
+                replicas,
+            } => {
+                let url =
+                    v2_url(&args.gateway_url, &format!("/models/{}/start", model_uid));
+                let body = serde_json::json!({ "replicas": replicas });
+                let resp = auth(client.post(&url), token.as_ref())
+                    .json(&body)
+                    .send()
+                    .await?;
+                if resp.status().is_success() {
+                    println!("✓ Model '{}' starting with {} replicas", model_uid, replicas);
+                } else {
+                    eprintln!("✗ Failed to start model: {}", resp.text().await?);
+                }
+            }
+            ModelCommand::Stop { model_uid } => {
+                let url =
+                    v2_url(&args.gateway_url, &format!("/models/{}/stop", model_uid));
+                let resp = auth(client.post(&url), token.as_ref()).send().await?;
+                if resp.status().is_success() {
+                    println!("✓ Model '{}' stopped", model_uid);
+                } else {
+                    eprintln!("✗ Failed to stop model: {}", resp.text().await?);
+                }
+            }
+            ModelCommand::Delete { model_uid } => {
+                let url =
+                    v2_url(&args.gateway_url, &format!("/models/{}", model_uid));
+                let resp = auth(client.delete(&url), token.as_ref()).send().await?;
+                if resp.status().is_success() {
+                    println!("✓ Model '{}' deleted", model_uid);
+                } else {
+                    eprintln!("✗ Failed to delete model: {}", resp.text().await?);
+                }
+            }
+            ModelCommand::ScaleModel {
+                model_uid,
+                replicas,
+            } => {
+                let url =
+                    v2_url(&args.gateway_url, &format!("/models/{}/scale", model_uid));
+                let body = serde_json::json!({ "replicas": replicas });
+                let resp = auth(client.put(&url), token.as_ref())
+                    .json(&body)
+                    .send()
+                    .await?;
+                if resp.status().is_success() {
+                    println!(
+                        "✓ Model '{}' scaled to {} replicas",
+                        model_uid, replicas
+                    );
+                } else {
+                    eprintln!("✗ Failed to scale model: {}", resp.text().await?);
+                }
+            }
+            // Legacy v1 commands
             ModelCommand::Load {
                 name,
                 uid,
@@ -106,6 +218,121 @@ async fn main() -> Result<()> {
                     println!("✓ Model unload request submitted for ID: {}", id);
                 } else {
                     eprintln!("✗ Failed to unload model: {}", resp.text().await?);
+                }
+            }
+        },
+        Command::Template { subcommand } => match subcommand {
+            TemplateCommand::List => {
+                let url = v2_url(&args.gateway_url, "/templates");
+                let resp = auth(client.get(&url), token.as_ref()).send().await?;
+                if resp.status().is_success() {
+                    let templates: Vec<serde_json::Value> = resp.json().await?;
+                    print_templates(&templates);
+                } else {
+                    eprintln!("✗ Failed to list templates: {}", resp.text().await?);
+                }
+            }
+            TemplateCommand::Create {
+                name,
+                model_name,
+                engine,
+                source,
+            } => {
+                let url = v2_url(&args.gateway_url, "/templates");
+                let body = serde_json::json!({
+                    "name": name,
+                    "model_name": model_name,
+                    "engine_type": engine,
+                    "source": source,
+                });
+                let resp = auth(client.post(&url), token.as_ref())
+                    .json(&body)
+                    .send()
+                    .await?;
+                if resp.status().is_success() {
+                    println!("✓ Template '{}' created", name);
+                    println!("{}", resp.text().await?);
+                } else {
+                    eprintln!("✗ Failed to create template: {}", resp.text().await?);
+                }
+            }
+            TemplateCommand::Deploy {
+                template_id,
+                uid,
+                replicas,
+            } => {
+                let url = v2_url(
+                    &args.gateway_url,
+                    &format!("/templates/{}/deploy", template_id),
+                );
+                let mut body = serde_json::json!({ "replicas": replicas });
+                if let Some(u) = &uid {
+                    body["model_uid"] = serde_json::json!(u);
+                }
+                let resp = auth(client.post(&url), token.as_ref())
+                    .json(&body)
+                    .send()
+                    .await?;
+                if resp.status().is_success() {
+                    println!("✓ Template '{}' deployed with {} replicas", template_id, replicas);
+                    println!("{}", resp.text().await?);
+                } else {
+                    eprintln!("✗ Failed to deploy template: {}", resp.text().await?);
+                }
+            }
+            TemplateCommand::Save { model_uid, name } => {
+                let url = v2_url(
+                    &args.gateway_url,
+                    &format!("/models/{}/save-as-template", model_uid),
+                );
+                let body = serde_json::json!({ "name": name });
+                let resp = auth(client.post(&url), token.as_ref())
+                    .json(&body)
+                    .send()
+                    .await?;
+                if resp.status().is_success() {
+                    println!("✓ Model '{}' saved as template '{}'", model_uid, name);
+                    println!("{}", resp.text().await?);
+                } else {
+                    eprintln!("✗ Failed to save as template: {}", resp.text().await?);
+                }
+            }
+        },
+        Command::Cache { subcommand } => match subcommand {
+            CacheCommand::List { node } => {
+                if let Some(node_id) = node {
+                    let url = v2_url(
+                        &args.gateway_url,
+                        &format!("/nodes/{}/cache", node_id),
+                    );
+                    let resp = auth(client.get(&url), token.as_ref()).send().await?;
+                    if resp.status().is_success() {
+                        let data: serde_json::Value = resp.json().await?;
+                        print_node_cache(&data);
+                    } else {
+                        eprintln!("✗ Failed to get node cache: {}", resp.text().await?);
+                    }
+                } else {
+                    let url = v2_url(&args.gateway_url, "/cache/summary");
+                    let resp = auth(client.get(&url), token.as_ref()).send().await?;
+                    if resp.status().is_success() {
+                        let data: serde_json::Value = resp.json().await?;
+                        print_cache_summary(&data);
+                    } else {
+                        eprintln!("✗ Failed to get cache summary: {}", resp.text().await?);
+                    }
+                }
+            }
+        },
+        Command::Disk { subcommand } => match subcommand {
+            DiskCommand::Status => {
+                let url = v2_url(&args.gateway_url, "/alerts");
+                let resp = auth(client.get(&url), token.as_ref()).send().await?;
+                if resp.status().is_success() {
+                    let data: serde_json::Value = resp.json().await?;
+                    print_disk_status(&data);
+                } else {
+                    eprintln!("✗ Failed to get disk status: {}", resp.text().await?);
                 }
             }
         },

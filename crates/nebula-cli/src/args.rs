@@ -32,6 +32,21 @@ pub enum Command {
         #[command(subcommand)]
         subcommand: ModelCommand,
     },
+    /// Template management
+    Template {
+        #[command(subcommand)]
+        subcommand: TemplateCommand,
+    },
+    /// Cache management
+    Cache {
+        #[command(subcommand)]
+        subcommand: CacheCommand,
+    },
+    /// Disk management
+    Disk {
+        #[command(subcommand)]
+        subcommand: DiskCommand,
+    },
     /// Show current auth identity
     Whoami,
     /// Fetch gateway metrics
@@ -60,7 +75,7 @@ pub enum Command {
         #[arg(long, default_value_t = 2048)]
         max_tokens: u32,
     },
-    /// Scale model replicas
+    /// Scale model replicas (legacy v1)
     Scale {
         /// Model request ID
         #[arg(long)]
@@ -88,9 +103,61 @@ pub enum ClusterCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ModelCommand {
-    /// List all model requests and their status
+    /// List all models with aggregated state (v2 API)
     List,
-    /// Load a new model
+    /// Get model detail
+    Get {
+        /// Model UID
+        model_uid: String,
+    },
+    /// Create a new model
+    Create {
+        /// Model name (e.g. "Qwen/Qwen2.5-7B-Instruct")
+        #[arg(long)]
+        name: String,
+        /// Model UID (auto-generated if not provided)
+        #[arg(long)]
+        uid: Option<String>,
+        /// Engine type (default: vllm)
+        #[arg(long, default_value = "vllm")]
+        engine: String,
+        /// Model source: huggingface, modelscope, local
+        #[arg(long, default_value = "huggingface")]
+        source: String,
+        /// Start the model immediately after creation
+        #[arg(long)]
+        start: bool,
+        /// Number of replicas (when --start is used)
+        #[arg(long, default_value_t = 1)]
+        replicas: u32,
+    },
+    /// Start a stopped model
+    Start {
+        /// Model UID
+        model_uid: String,
+        /// Number of replicas
+        #[arg(long, default_value_t = 1)]
+        replicas: u32,
+    },
+    /// Stop a running model
+    Stop {
+        /// Model UID
+        model_uid: String,
+    },
+    /// Delete a model
+    Delete {
+        /// Model UID
+        model_uid: String,
+    },
+    /// Scale model replicas (v2)
+    ScaleModel {
+        /// Model UID
+        model_uid: String,
+        /// Desired replica count
+        #[arg(long)]
+        replicas: u32,
+    },
+    /// Load a new model (legacy v1 API)
     Load {
         /// User-facing model name
         #[arg(long)]
@@ -122,9 +189,65 @@ pub enum ModelCommand {
         #[arg(long, value_delimiter = ',')]
         lora: Option<Vec<String>>,
     },
-    /// Unload a model by request ID
+    /// Unload a model by request ID (legacy v1 API)
     Unload {
         /// Request ID to unload
         id: String,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TemplateCommand {
+    /// List all templates
+    List,
+    /// Create a new template
+    Create {
+        /// Template name
+        #[arg(long)]
+        name: String,
+        /// Model name (e.g. "Qwen/Qwen2.5-7B-Instruct")
+        #[arg(long)]
+        model_name: String,
+        /// Engine type (default: vllm)
+        #[arg(long, default_value = "vllm")]
+        engine: String,
+        /// Model source: huggingface, modelscope, local
+        #[arg(long, default_value = "huggingface")]
+        source: String,
+    },
+    /// Deploy a template as a running model
+    Deploy {
+        /// Template ID
+        template_id: String,
+        /// Model UID (auto-generated if not provided)
+        #[arg(long)]
+        uid: Option<String>,
+        /// Number of replicas
+        #[arg(long, default_value_t = 1)]
+        replicas: u32,
+    },
+    /// Save a running model as a template
+    Save {
+        /// Model UID to save
+        model_uid: String,
+        /// Template name
+        #[arg(long)]
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CacheCommand {
+    /// List cached models
+    List {
+        /// Filter by node ID
+        #[arg(long)]
+        node: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DiskCommand {
+    /// Show disk status
+    Status,
 }
