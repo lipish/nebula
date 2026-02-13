@@ -3,7 +3,7 @@ use std::sync::Arc;
 use nebula_meta::EtcdMetaStore;
 
 use crate::audit::AuditWriter;
-use crate::auth::AuthState;
+use crate::auth::AuthConfig;
 use crate::engine::EngineClient;
 use crate::metrics::Metrics;
 
@@ -14,10 +14,16 @@ pub struct AppState {
     pub router_base_url: String,
     pub http: reqwest::Client,
     pub store: Arc<EtcdMetaStore>,
-    pub auth: AuthState,
+    pub auth: AuthConfig,
     pub metrics: Arc<Metrics>,
     pub log_path: String,
     pub audit: Option<Arc<AuditWriter>>,
     pub xtrace_url: Option<String>,
     pub xtrace_token: Option<String>,
+}
+
+impl AsRef<AuthConfig> for AppState {
+    fn as_ref(&self) -> &AuthConfig {
+        &self.auth
+    }
 }

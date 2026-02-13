@@ -20,7 +20,7 @@ use clap::Parser;
 
 use crate::args::Args;
 use crate::audit::AuditWriter;
-use crate::auth::parse_auth_from_env;
+use nebula_common::auth::parse_auth_from_env;
 use crate::engine::{EngineClient, OpenAIEngineClient};
 use crate::handlers::{
     admin_audit_logs, admin_cluster_status, admin_delete_image, admin_delete_request,
@@ -135,7 +135,7 @@ async fn main() {
         .nest("/v1/admin", admin_routes)
         // Global middleware
         .layer(middleware::from_fn_with_state(st.clone(), audit::audit_middleware))
-        .layer(middleware::from_fn_with_state(st.clone(), auth::admin_auth))
+        .layer(middleware::from_fn_with_state(st.clone(), nebula_common::auth::auth_middleware::<AppState>))
         .layer(middleware::from_fn_with_state(st.clone(), track_requests))
         .with_state(st);
 
