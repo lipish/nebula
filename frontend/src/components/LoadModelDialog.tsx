@@ -512,7 +512,7 @@ export function LoadModelDialog({
                                                 <Server className="h-3 w-3" />
                                                 {node.node_id.toUpperCase()}
                                             </p>
-                                            <div className="grid gap-2">
+                                            <div className="grid gap-2 p-0.5">
                                                 {node.gpus.map((gpu) => {
                                                     const isUsed = usedGpus.get(node.node_id)?.has(gpu.index) ?? false
                                                     const isSel = isThisNode && selectedGpuIndices.has(gpu.index)
@@ -525,72 +525,71 @@ export function LoadModelDialog({
                                                     const usedModelUid = usedPlacement?.model_uid ?? null
                                                     const unloadRequestId = usedModelUid ? resolveRequestId(usedModelUid, usedPlacement?.request_id ?? null) : null
                                                     return (
-                                                        <button
-                                                            key={gpu.index}
-                                                            onClick={() => {
-                                                                if (isUsed && !isSel) return
-                                                                toggleGpu(node.node_id, gpu.index)
-                                                            }}
-                                                            className={cn(
-                                                                "flex items-center justify-between rounded-xl border p-3 text-left transition-all shadow-sm",
-                                                                isUsed && !isSel && "opacity-60 cursor-not-allowed",
-                                                                isSel
-                                                                    ? "border-primary bg-primary/[0.03] ring-1 ring-primary"
-                                                                    : "border-border hover:border-primary/40 hover:bg-accent/30"
-                                                            )}
-                                                        >
-                                                            <div className="flex-1">
-                                                                <div className="flex items-center justify-between mb-1.5">
-                                                                    <div className="flex items-center gap-1.5">
-                                                                        <Cpu className={cn("h-3.5 w-3.5", isSel ? "text-primary" : "text-muted-foreground")} />
-                                                                        <span className="text-xs font-bold">GPU {gpu.index}</span>
+                                                        <div key={gpu.index} className="flex items-center gap-2">
+                                                            <button
+                                                                onClick={() => {
+                                                                    if (isUsed && !isSel) return
+                                                                    toggleGpu(node.node_id, gpu.index)
+                                                                }}
+                                                                className={cn(
+                                                                    "flex-1 flex items-center justify-between rounded-xl border p-3 text-left transition-all shadow-sm",
+                                                                    isUsed && !isSel && "opacity-60 cursor-not-allowed",
+                                                                    isSel
+                                                                        ? "border-primary bg-primary/[0.03] ring-1 ring-primary"
+                                                                        : "border-border hover:border-primary/40 hover:bg-accent/30"
+                                                                )}
+                                                            >
+                                                                <div className="flex-1">
+                                                                    <div className="flex items-center justify-between mb-1.5">
+                                                                        <div className="flex items-center gap-1.5">
+                                                                            <Cpu className={cn("h-3.5 w-3.5", isSel ? "text-primary" : "text-muted-foreground")} />
+                                                                            <span className="text-xs font-bold">GPU {gpu.index}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className={cn("text-[10px] font-bold", lowVram ? "text-destructive" : "text-muted-foreground")}>
+                                                                                Free {freeGb} GB (Total {totalGb} GB)
+                                                                            </span>
+                                                                            <span className="text-[10px] font-bold text-muted-foreground">{usage}% used</span>
+                                                                        </div>
                                                                     </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className={cn("text-[10px] font-bold", lowVram ? "text-destructive" : "text-muted-foreground")}>
-                                                                            Free {freeGb} GB (Total {totalGb} GB)
-                                                                        </span>
-                                                                        <span className="text-[10px] font-bold text-muted-foreground">{usage}% used</span>
+                                                                    <div className="h-1 w-full bg-accent rounded-full overflow-hidden">
+                                                                        <div
+                                                                            className={cn("h-full rounded-full transition-all",
+                                                                                usage > 80 ? "bg-destructive" : (isSel ? "bg-primary" : "bg-primary/50")
+                                                                            )}
+                                                                            style={{ width: `${usage}%` }}
+                                                                        />
                                                                     </div>
+                                                                    {lowVram && isSel && (
+                                                                        <div className="flex items-center gap-1 mt-1.5 text-[10px] text-amber-500">
+                                                                            <AlertTriangle className="h-3 w-3" />
+                                                                            Low VRAM — model may fail to load
+                                                                        </div>
+                                                                    )}
                                                                 </div>
-                                                                <div className="h-1 w-full bg-accent rounded-full overflow-hidden">
-                                                                    <div
-                                                                        className={cn("h-full rounded-full transition-all",
-                                                                            usage > 80 ? "bg-destructive" : (isSel ? "bg-primary" : "bg-primary/50")
-                                                                        )}
-                                                                        style={{ width: `${usage}%` }}
-                                                                    />
-                                                                </div>
-                                                                {lowVram && isSel && (
-                                                                    <div className="flex items-center gap-1 mt-1.5 text-[10px] text-amber-500">
-                                                                        <AlertTriangle className="h-3 w-3" />
-                                                                        Low VRAM — model may fail to load
+                                                                {isUsed && !isSel && (
+                                                                    <Badge className="ml-2 text-[9px] font-bold bg-secondary text-secondary-foreground border-0">IN USE</Badge>
+                                                                )}
+                                                                {isSel && (
+                                                                    <div className="ml-2 h-4 w-4 rounded-full bg-primary flex items-center justify-center">
+                                                                        <Check className="h-2.5 w-2.5 text-primary-foreground" />
                                                                     </div>
                                                                 )}
-                                                            </div>
-                                                            {isUsed && !isSel && (
-                                                                <Badge className="ml-2 text-[9px] font-bold bg-secondary text-secondary-foreground border-0">IN USE</Badge>
-                                                            )}
+                                                            </button>
                                                             {isUsed && unloadRequestId && !isSel && (
                                                                 <Button
                                                                     variant="secondary"
                                                                     size="sm"
-                                                                    className="ml-2 h-7 rounded-lg text-[10px] font-bold"
-                                                                    onClick={async (e) => {
-                                                                        e.preventDefault()
-                                                                        e.stopPropagation()
+                                                                    className="h-7 rounded-lg text-[10px] font-bold shrink-0"
+                                                                    onClick={async () => {
                                                                         await onUnloadRequestId(unloadRequestId)
                                                                     }}
                                                                     disabled={submitting}
                                                                 >
-                                                                    释放
+                                                                    Unload
                                                                 </Button>
                                                             )}
-                                                            {isSel && (
-                                                                <div className="ml-2 h-4 w-4 rounded-full bg-primary flex items-center justify-center">
-                                                                    <Check className="h-2.5 w-2.5 text-primary-foreground" />
-                                                                </div>
-                                                            )}
-                                                        </button>
+                                                        </div>
                                                     )
                                                 })}
                                             </div>

@@ -174,6 +174,8 @@ function App() {
             counts={counts}
             gpuStats={gpuStats}
             pct={pct}
+            engineStats={engineStats}
+            token={token}
           />
         )}
         {page === 'models' && (
