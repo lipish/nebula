@@ -17,4 +17,12 @@ pub struct Args {
 
     #[arg(long, env = "NEBULA_ENGINE_MODEL")]
     pub engine_model: Option<String>,
+
+    /// OTLP endpoint for exporting traces (e.g. "http://10.21.11.92:8742/api/public/otel").
+    #[arg(long, env = "XTRACE_URL")]
+    pub xtrace_url: Option<String>,
+
+    /// Bearer token for xtrace authentication.
+    #[arg(long, env = "XTRACE_TOKEN")]
+    pub xtrace_token: Option<String>,
 }

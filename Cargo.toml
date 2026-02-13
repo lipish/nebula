@@ -37,3 +37,7 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 xtrace-client = "0.0.7"
 xtrace = "0.0.7"
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", features = ["http-proto", "reqwest-client"] }
+tracing-opentelemetry = "0.28"

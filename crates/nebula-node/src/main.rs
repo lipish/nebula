@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tracing_subscriber::EnvFilter;
 
 use futures_util::StreamExt;
 use nebula_common::PlacementPlan;
@@ -39,11 +38,13 @@ fn init_xtrace_client(args: &Args) -> Option<xtrace_client::Client> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
-
     let args = Args::parse();
+
+    let _otel_guard = nebula_common::telemetry::init_tracing(
+        "nebula-node",
+        args.xtrace_url.as_deref(),
+        args.xtrace_token.as_deref(),
+    );
     println!(
         "DEBUG: nebula-node process started! node_id={}",
         args.node_id

@@ -14,7 +14,6 @@ use axum::{
     Router,
 };
 use clap::Parser;
-use tracing_subscriber::EnvFilter;
 
 use crate::args::Args;
 use crate::handlers::{healthz, proxy_chat_completions};
@@ -24,11 +23,13 @@ use crate::sync::{endpoints_sync_loop, placement_sync_loop, stats_sync_loop};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
-
     let args = Args::parse();
+
+    let _otel_guard = nebula_common::telemetry::init_tracing(
+        "nebula-router",
+        args.xtrace_url.as_deref(),
+        args.xtrace_token.as_deref(),
+    );
 
     let store =
         nebula_meta::EtcdMetaStore::connect(std::slice::from_ref(&args.etcd_endpoint)).await?;

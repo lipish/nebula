@@ -16,7 +16,6 @@ use axum::{
     Router,
 };
 use clap::Parser;
-use tracing_subscriber::EnvFilter;
 
 use crate::args::Args;
 use crate::auth::parse_auth_from_env;
@@ -31,11 +30,13 @@ use crate::util::read_engine_env_file;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
-
     let args = Args::parse();
+
+    let _otel_guard = nebula_common::telemetry::init_tracing(
+        "nebula-gateway",
+        args.xtrace_url.as_deref(),
+        args.xtrace_token.as_deref(),
+    );
     let router_base_url = args.router_url;
 
     let engine_model = match args.engine_model {
