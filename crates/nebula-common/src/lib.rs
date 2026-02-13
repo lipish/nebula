@@ -14,4 +14,5 @@ pub use model_request::*;
 pub use node_status::{GpuStatus, NodeStatus};
 pub use placement::{PlacementAssignment, PlacementPlan};
 
+pub mod auth;
 pub mod telemetry;
