@@ -44,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
         "nebula-node",
         args.xtrace_url.as_deref(),
         args.xtrace_token.as_deref(),
+        &args.log_format,
     );
     println!(
         "DEBUG: nebula-node process started! node_id={}",
