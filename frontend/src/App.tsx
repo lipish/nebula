@@ -16,6 +16,7 @@ import { InferenceView } from '@/components/views/inference'
 import { EndpointsView } from '@/components/views/endpoints'
 import { AuditView } from '@/components/views/audit'
 import { ImagesView } from '@/components/views/images'
+import { TemplatesView } from '@/components/views/templates'
 
 const EMPTY_OVERVIEW: ClusterStatus = {
   nodes: [],
@@ -24,7 +25,7 @@ const EMPTY_OVERVIEW: ClusterStatus = {
   model_requests: [],
 }
 
-type Page = 'dashboard' | 'models' | 'model-detail' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images'
+type Page = 'dashboard' | 'models' | 'model-detail' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images' | 'templates'
 
 const fmtTime = (v: number) => (v ? new Date(v).toLocaleString() : 'n/a')
 
@@ -236,6 +237,9 @@ function App() {
         )}
         {page === 'images' && (
           <ImagesView token={token} />
+        )}
+        {page === 'templates' && (
+          <TemplatesView token={token} />
         )}
       </main>
     </div>
