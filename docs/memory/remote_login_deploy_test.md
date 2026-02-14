@@ -128,3 +128,24 @@ protoc --version
 ### C. `pkill ... Operation not permitted`
 
 `nebula-down.sh` 某些 PID 可能无权限清理。通常可先忽略，继续 `up` 并以健康检查为准；如服务异常再针对对应 PID 处理。
+
+### D. `{"message":"Unauthorized"}`（Audit Logs）
+
+这是高频问题，通常是 `XTRACE_TOKEN` 缺失或未生效：
+
+```bash
+# 1) 对齐 token
+TOKEN=$(grep -E '^API_BEARER_TOKEN=' ~/github/xtrace/.env | head -n1 | cut -d= -f2-)
+sed -i "s|^XTRACE_TOKEN=.*$|XTRACE_TOKEN=${TOKEN}|" ~/github/nebula/deploy/nebula.env
+
+# 2) 重启
+cd ~/github/nebula
+./bin/nebula-down.sh || true
+START_BFF=1 ./bin/nebula-up.sh
+
+# 3) 验证
+curl -sS -i "http://127.0.0.1:18090/api/audit-logs?limit=1" \
+  -H "Authorization: Bearer devtoken" | sed -n '1,20p'
+```
+
+期望返回 `HTTP/1.1 200 OK`。

@@ -6,6 +6,16 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed
+- Updated `bin/nebula-up.sh` with xtrace preflight validation to fail fast when `XTRACE_AUTH_MODE=service` but `XTRACE_TOKEN` is empty.
+
+### Added
+- Added a deployment checklist for preventing recurrent `{"message":"Unauthorized"}` on `/api/audit-logs`.
+- Added remote runbook troubleshooting steps to auto-sync `XTRACE_TOKEN` from `~/github/xtrace/.env` and verify audit API health.
+
+### Fixed
+- Fixed a common operational misconfiguration where missing `deploy/nebula.env` or empty `XTRACE_TOKEN` caused Audit Logs to fail intermittently after restart.
+
 ## [2026-02-14]
 
 ### Added

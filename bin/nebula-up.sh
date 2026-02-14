@@ -34,6 +34,19 @@ XTRACE_AUTH_MODE="${XTRACE_AUTH_MODE:-internal}"
 # Example: START_BFF=1 XTRACE_TOKEN=nebula-xtrace-token-2026 ./bin/nebula-up.sh
 START_BFF="${START_BFF:-0}"
 
+# Preflight checks to avoid frequent xtrace auth misconfiguration.
+if [ "$START_BFF" = "1" ] && [ "$XTRACE_AUTH_MODE" = "service" ] && [ -z "$XTRACE_TOKEN" ]; then
+    echo "ERROR: XTRACE_AUTH_MODE=service but XTRACE_TOKEN is empty."
+    echo "Fix: set XTRACE_TOKEN in $ENV_FILE (or export it) before starting."
+    echo "Tip: XTRACE_TOKEN=\$(grep -E '^API_BEARER_TOKEN=' ~/github/xtrace/.env | head -n1 | cut -d= -f2-)"
+    exit 1
+fi
+
+if [ "$START_BFF" = "1" ] && [ ! -f "$ENV_FILE" ]; then
+    echo "WARN: $ENV_FILE not found; using process env only."
+    echo "      Missing XTRACE_TOKEN often causes /api/audit-logs Unauthorized."
+fi
+
 mkdir -p "$LOG_DIR"
 
 echo "Starting Nebula Service Stack..."

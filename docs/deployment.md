@@ -188,6 +188,28 @@ export XTRACE_TOKEN=<your-internal-service-token>
 
 当 `XTRACE_AUTH_MODE=service` 且 `XTRACE_TOKEN` 为空时，BFF 会返回配置错误，避免误以为是权限问题。
 
+### 避免 `{"message":"Unauthorized"}` 的固定检查清单
+
+`/api/audit-logs` 常见 `Unauthorized` 根因是 xtrace token 未配置或配置未生效。建议每次部署都执行以下检查：
+
+```bash
+# 1) 确认统一配置文件存在
+test -f ~/github/nebula/deploy/nebula.env && echo "nebula.env ok"
+
+# 2) 确认三项关键配置
+grep -E '^XTRACE_URL=|^XTRACE_AUTH_MODE=|^XTRACE_TOKEN=' ~/github/nebula/deploy/nebula.env
+
+# 3) 推荐自动对齐 xtrace token（从 xtrace .env 读取）
+TOKEN=$(grep -E '^API_BEARER_TOKEN=' ~/github/xtrace/.env | head -n1 | cut -d= -f2-)
+sed -i "s|^XTRACE_TOKEN=.*$|XTRACE_TOKEN=${TOKEN}|" ~/github/nebula/deploy/nebula.env
+
+# 4) 重启 Nebula 并验证 audit API
+cd ~/github/nebula && ./bin/nebula-down.sh || true && START_BFF=1 ./bin/nebula-up.sh
+curl -sS -i "http://127.0.0.1:18090/api/audit-logs?limit=1" -H "Authorization: Bearer devtoken" | sed -n '1,20p'
+```
+
+期望：返回 `HTTP/1.1 200 OK`。
+
 ## 6. 快速验证
 
 ### 非流式 Chat
@@ -237,6 +259,27 @@ curl -N http://127.0.0.1:8081/v1/responses \
 | xtrace | 8742 | 审计与观测后端 |
 
 ## 8. 常见问题
+
+### 8.1 `{"message":"Unauthorized"}`（Audit Logs）
+
+按顺序排查：
+
+1. `deploy/nebula.env` 是否存在；
+2. `XTRACE_AUTH_MODE` 是否为 `service` 且 `XTRACE_TOKEN` 非空；
+3. `XTRACE_TOKEN` 是否与 `~/github/xtrace/.env` 的 `API_BEARER_TOKEN` 一致；
+4. 重启后确认进程参数中包含 `--xtrace-token` 非空：
+
+```bash
+pgrep -af 'nebula-bff|nebula-gateway'
+```
+
+5. 直接验证 xtrace：
+
+```bash
+TOKEN=$(grep -E '^API_BEARER_TOKEN=' ~/github/xtrace/.env | head -n1 | cut -d= -f2-)
+curl -sS -i "http://127.0.0.1:8742/api/public/traces?tags%5B%5D=audit&limit=1" \
+  -H "Authorization: Bearer ${TOKEN}" | sed -n '1,20p'
+```
 
 ### 端口被占用
 
