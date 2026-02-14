@@ -86,11 +86,21 @@ else
 fi
 
 echo
-info "4) Remote runtime config snapshot"
+info "4) Router freshness metric exposure"
+route_metric_ok=1
+if ssh -o ConnectTimeout=8 "${USER_NAME}@${HOST}" "curl -fsS http://127.0.0.1:18081/metrics | grep -q '^nebula_router_route_stale_stats_dropped_total '"; then
+  pass "Router metric nebula_router_route_stale_stats_dropped_total is exposed"
+else
+  route_metric_ok=0
+  fail "Router metric nebula_router_route_stale_stats_dropped_total missing"
+fi
+
+echo
+info "5) Remote runtime config snapshot"
 ssh "${USER_NAME}@${HOST}" 'set -e; cd ~/github/nebula; echo "commit=$(git rev-parse --short HEAD)"; echo "XTRACE settings:"; grep -E "^XTRACE_(URL|TOKEN|AUTH_MODE)=" deploy/nebula.env || true' || true
 
 echo
-if [[ "$models_code" == "200" && "$audit_code" == "200" && "$all_ok" -eq 1 ]]; then
+if [[ "$models_code" == "200" && "$audit_code" == "200" && "$all_ok" -eq 1 && "$route_metric_ok" -eq 1 ]]; then
   pass "Overall health check PASSED"
   exit 0
 else
