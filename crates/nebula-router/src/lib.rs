@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -37,6 +38,10 @@ pub struct Router {
     model_names: DashMap<String, String>,
     /// model_uid → model_name (reverse mapping)
     model_uids_to_names: DashMap<String, String>,
+    xtrace_query_errors_total: AtomicU64,
+    xtrace_rate_limited_total: AtomicU64,
+    xtrace_stale_total: AtomicU64,
+    xtrace_truncated_total: AtomicU64,
 }
 
 impl std::fmt::Debug for Router {
@@ -61,6 +66,10 @@ impl Router {
             strategy,
             model_names: DashMap::new(),
             model_uids_to_names: DashMap::new(),
+            xtrace_query_errors_total: AtomicU64::new(0),
+            xtrace_rate_limited_total: AtomicU64::new(0),
+            xtrace_stale_total: AtomicU64::new(0),
+            xtrace_truncated_total: AtomicU64::new(0),
         })
     }
 
@@ -89,6 +98,41 @@ impl Router {
     pub fn upsert_stats(&self, stats: EndpointStats) {
         self.stats
             .insert((stats.model_uid.clone(), stats.replica_id), stats);
+    }
+
+    pub fn inc_xtrace_query_errors(&self) {
+        self.xtrace_query_errors_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_xtrace_rate_limited(&self) {
+        self.xtrace_rate_limited_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_xtrace_stale(&self) {
+        self.xtrace_stale_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_xtrace_truncated(&self) {
+        self.xtrace_truncated_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn xtrace_query_errors_total(&self) -> u64 {
+        self.xtrace_query_errors_total.load(Ordering::Relaxed)
+    }
+
+    pub fn xtrace_rate_limited_total(&self) -> u64 {
+        self.xtrace_rate_limited_total.load(Ordering::Relaxed)
+    }
+
+    pub fn xtrace_stale_total(&self) -> u64 {
+        self.xtrace_stale_total.load(Ordering::Relaxed)
+    }
+
+    pub fn xtrace_truncated_total(&self) -> u64 {
+        self.xtrace_truncated_total.load(Ordering::Relaxed)
     }
 
     pub fn clear_session_affinity(&self, session_id: &str) {

@@ -149,6 +149,30 @@ pub async fn metrics_handler(State(st): State<AppState>) -> impl IntoResponse {
         st.metrics.status_4xx.load(Ordering::Relaxed),
         st.metrics.status_5xx.load(Ordering::Relaxed),
     ));
+    body.push_str(&format!(
+        "# HELP nebula_router_xtrace_query_errors_total xtrace query errors in stats sync loop.\n\
+         # TYPE nebula_router_xtrace_query_errors_total counter\n\
+         nebula_router_xtrace_query_errors_total {}\n",
+        st.router.xtrace_query_errors_total(),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_router_xtrace_rate_limited_total xtrace 429 responses observed in stats sync loop.\n\
+         # TYPE nebula_router_xtrace_rate_limited_total counter\n\
+         nebula_router_xtrace_rate_limited_total {}\n",
+        st.router.xtrace_rate_limited_total(),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_router_xtrace_stale_total stale xtrace metric responses skipped.\n\
+         # TYPE nebula_router_xtrace_stale_total counter\n\
+         nebula_router_xtrace_stale_total {}\n",
+        st.router.xtrace_stale_total(),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_router_xtrace_truncated_total truncated xtrace metric responses observed.\n\
+         # TYPE nebula_router_xtrace_truncated_total counter\n\
+         nebula_router_xtrace_truncated_total {}\n",
+        st.router.xtrace_truncated_total(),
+    ));
 
     // Per-model counters
     body.push_str("# HELP nebula_route_total Per-model request count.\n# TYPE nebula_route_total counter\n");

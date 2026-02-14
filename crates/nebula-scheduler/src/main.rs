@@ -61,19 +61,23 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Create xtrace client for stats queries
-    let xtrace = args.xtrace_url.as_deref().and_then(|url| {
-        let token = args.xtrace_token.as_deref().unwrap_or("");
-        match xtrace_client::Client::new(url, token) {
-            Ok(c) => {
-                info!("xtrace client created for stats queries (url={})", url);
-                Some(c)
-            }
-            Err(e) => {
-                warn!(error=%e, "failed to create xtrace client, autoscaling stats disabled");
-                None
-            }
-        }
+    // Build xtrace query config for autoscaling signals.
+    let xtrace = args.xtrace_url.as_deref().map(|url| {
+        let freshness_ms = std::env::var("NEBULA_XTRACE_METRIC_MAX_AGE_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(120_000);
+        let cfg = reconcile::XtraceQueryConfig {
+            url: url.to_string(),
+            token: args.xtrace_token.clone().unwrap_or_default(),
+            freshness_ms,
+        };
+        info!(
+            xtrace_url=%cfg.url,
+            freshness_ms=cfg.freshness_ms,
+            "xtrace signal query enabled"
+        );
+        cfg
     });
 
     // Spawn reconcile loop (health self-healing)

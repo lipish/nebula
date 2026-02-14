@@ -1516,6 +1516,7 @@ dependencies = [
  "futures-util",
  "nebula-common",
  "nebula-meta",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
@@ -3848,9 +3849,9 @@ dependencies = [
 
 [[package]]
 name = "xtrace-client"
-version = "0.0.8"
+version = "0.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9971d2a8d7f4f4887a4d93b90901ab82a3119b16877112bb1fa2ed1ba63d9c03"
+checksum = "0ec1c4c93fe1567a0c8664f85eab5dc0bcf4d30ecda1ee6074df96484acda8a3"
 dependencies = [
  "chrono",
  "reqwest",

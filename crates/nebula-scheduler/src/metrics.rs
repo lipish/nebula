@@ -19,6 +19,14 @@ pub struct SharedMetrics {
     pub scale_up_total: AtomicU64,
     /// Scale-down decisions made.
     pub scale_down_total: AtomicU64,
+    /// xtrace metric query errors.
+    pub xtrace_query_errors_total: AtomicU64,
+    /// xtrace rate-limited responses (429).
+    pub xtrace_rate_limited_total: AtomicU64,
+    /// xtrace stale metric responses skipped.
+    pub xtrace_stale_total: AtomicU64,
+    /// xtrace truncated metric responses observed.
+    pub xtrace_truncated_total: AtomicU64,
 }
 
 /// GET /metrics — Prometheus text exposition format.
@@ -41,13 +49,29 @@ pub async fn metrics_handler(State(metrics): State<Arc<SharedMetrics>>) -> impl 
          nebula_scheduler_scale_up_total {}\n\
          # HELP nebula_scheduler_scale_down_total Scale-down decisions.\n\
          # TYPE nebula_scheduler_scale_down_total counter\n\
-         nebula_scheduler_scale_down_total {}\n",
+         nebula_scheduler_scale_down_total {}\n\
+         # HELP nebula_scheduler_xtrace_query_errors_total xtrace query errors while fetching autoscaling signals.\n\
+         # TYPE nebula_scheduler_xtrace_query_errors_total counter\n\
+         nebula_scheduler_xtrace_query_errors_total {}\n\
+         # HELP nebula_scheduler_xtrace_rate_limited_total xtrace 429 responses while fetching autoscaling signals.\n\
+         # TYPE nebula_scheduler_xtrace_rate_limited_total counter\n\
+         nebula_scheduler_xtrace_rate_limited_total {}\n\
+         # HELP nebula_scheduler_xtrace_stale_total stale xtrace responses skipped for autoscaling.\n\
+         # TYPE nebula_scheduler_xtrace_stale_total counter\n\
+         nebula_scheduler_xtrace_stale_total {}\n\
+         # HELP nebula_scheduler_xtrace_truncated_total truncated xtrace responses observed for autoscaling.\n\
+         # TYPE nebula_scheduler_xtrace_truncated_total counter\n\
+         nebula_scheduler_xtrace_truncated_total {}\n",
         metrics.reconcile_total.load(Ordering::Relaxed),
         metrics.reconcile_errors.load(Ordering::Relaxed),
         metrics.placements_total.load(Ordering::Relaxed),
         metrics.unhealthy_endpoints_total.load(Ordering::Relaxed),
         metrics.scale_up_total.load(Ordering::Relaxed),
         metrics.scale_down_total.load(Ordering::Relaxed),
+        metrics.xtrace_query_errors_total.load(Ordering::Relaxed),
+        metrics.xtrace_rate_limited_total.load(Ordering::Relaxed),
+        metrics.xtrace_stale_total.load(Ordering::Relaxed),
+        metrics.xtrace_truncated_total.load(Ordering::Relaxed),
     );
     (axum::http::StatusCode::OK, body)
 }

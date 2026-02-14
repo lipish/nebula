@@ -15,6 +15,13 @@ use crate::metrics::SharedMetrics;
 use crate::planner::{allocate_port, list_used_resources, select_node_and_gpus};
 use crate::util::now_ms;
 
+#[derive(Debug, Clone)]
+pub struct XtraceQueryConfig {
+    pub url: String,
+    pub token: String,
+    pub freshness_ms: u64,
+}
+
 /// Endpoint heartbeat timeout: if last_heartbeat_ms is older than this, consider it dead.
 /// Keep this generous to avoid reclaiming assignments during cold starts.
 const ENDPOINT_TIMEOUT_MS: u64 = 300_000;
@@ -47,7 +54,7 @@ const SCALE_DOWN_COOLDOWN_MS: u64 = 300_000; // 5 minutes
 pub async fn reconcile_loop(
     store: EtcdMetaStore,
     default_port: u16,
-    xtrace: Option<xtrace_client::Client>,
+    xtrace: Option<XtraceQueryConfig>,
     metrics: Arc<SharedMetrics>,
 ) {
     // Wait a bit before first reconcile to let the system stabilize.
@@ -64,7 +71,7 @@ pub async fn reconcile_loop(
     }
 }
 
-async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option<&xtrace_client::Client>, metrics: &SharedMetrics) -> anyhow::Result<()> {
+async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option<&XtraceQueryConfig>, metrics: &SharedMetrics) -> anyhow::Result<()> {
     let now = now_ms();
 
     // 1. Load all placements
@@ -117,7 +124,7 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
     }
 
     // 4. Load stats from xtrace (for autoscaling decisions)
-    let stats_by_model = fetch_stats_from_xtrace(xtrace).await;
+    let stats_by_model = fetch_stats_from_xtrace(xtrace, metrics).await;
 
     // 5. For each placement, reconcile
     for plan in &plans {
@@ -481,42 +488,188 @@ async fn add_replacement_replicas_from_plan(
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct XtraceMetricValue {
+    timestamp: String,
+    value: f64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct XtraceMetricSeries {
+    labels: serde_json::Value,
+    values: Vec<XtraceMetricValue>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct XtraceMetricMeta {
+    #[serde(default)]
+    latest_ts: Option<String>,
+    series_count: usize,
+    truncated: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct XtraceMetricResponse {
+    data: Vec<XtraceMetricSeries>,
+    meta: XtraceMetricMeta,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct XtraceErrorBody {
+    #[serde(default)]
+    code: Option<String>,
+}
+
+enum QueryResult {
+    Ok(XtraceMetricResponse),
+    RateLimited { retry_after_secs: u64 },
+    Err(String),
+}
+
+async fn query_metric(
+    http: &reqwest::Client,
+    cfg: &XtraceQueryConfig,
+    metric_name: &str,
+    from: chrono::DateTime<chrono::Utc>,
+    to: chrono::DateTime<chrono::Utc>,
+) -> QueryResult {
+    let mut url = match reqwest::Url::parse(&format!(
+        "{}/api/public/metrics/query",
+        cfg.url.trim_end_matches('/')
+    )) {
+        Ok(u) => u,
+        Err(e) => return QueryResult::Err(format!("invalid xtrace url: {e}")),
+    };
+
+    url.query_pairs_mut()
+        .append_pair("name", metric_name)
+        .append_pair("from", &from.to_rfc3339())
+        .append_pair("to", &to.to_rfc3339())
+        .append_pair("step", "120s")
+        .append_pair("agg", "last");
+
+    let resp = match http.get(url).bearer_auth(&cfg.token).send().await {
+        Ok(r) => r,
+        Err(e) => return QueryResult::Err(format!("request failed: {e}")),
+    };
+
+    if resp.status().as_u16() == 429 {
+        let retry_after_secs = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(5);
+        return QueryResult::RateLimited { retry_after_secs };
+    }
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        let code = serde_json::from_str::<XtraceErrorBody>(&text)
+            .ok()
+            .and_then(|b| b.code)
+            .unwrap_or_else(|| "UNKNOWN".to_string());
+        return QueryResult::Err(format!("http {} code={} body={}", status, code, text));
+    }
+
+    match resp.json::<XtraceMetricResponse>().await {
+        Ok(body) => QueryResult::Ok(body),
+        Err(e) => QueryResult::Err(format!("decode failed: {e}")),
+    }
+}
+
 /// Fetch latest engine stats from xtrace, grouped by model_uid.
 async fn fetch_stats_from_xtrace(
-    xtrace: Option<&xtrace_client::Client>,
+    xtrace: Option<&XtraceQueryConfig>,
+    metrics: &SharedMetrics,
 ) -> HashMap<String, Vec<EndpointStats>> {
+    use std::collections::HashSet;
+
     let mut stats_by_model: HashMap<String, Vec<EndpointStats>> = HashMap::new();
 
-    let client = match xtrace {
+    let cfg = match xtrace {
         Some(c) => c,
         None => return stats_by_model,
     };
 
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
     let now = chrono::Utc::now();
     let from = now - chrono::Duration::seconds(120);
+    let now_ms = now.timestamp_millis() as u64;
 
-    // Collect pending_requests and kv_cache_usage per (model_uid, replica_id)
     let mut pending_map: HashMap<(String, u32), u64> = HashMap::new();
     let mut kv_usage_map: HashMap<(String, u32), f64> = HashMap::new();
 
     for (metric_name, is_pending) in [("pending_requests", true), ("kv_cache_usage", false)] {
-        let q = xtrace_client::MetricsQueryParams {
-            name: metric_name.to_string(),
-            from: Some(from),
-            to: Some(now),
-            step: Some("120s".to_string()),
-            agg: Some("last".to_string()),
-            ..Default::default()
-        };
+        match query_metric(&http, cfg, metric_name, from, now).await {
+            QueryResult::RateLimited { retry_after_secs } => {
+                metrics
+                    .xtrace_rate_limited_total
+                    .fetch_add(1, Ordering::Relaxed);
+                warn!(
+                    metric=%metric_name,
+                    retry_after_secs,
+                    "xtrace rate limited scheduler signal query; skipping this reconcile cycle"
+                );
+                tokio::time::sleep(Duration::from_secs(retry_after_secs)).await;
+                return stats_by_model;
+            }
+            QueryResult::Err(e) => {
+                metrics
+                    .xtrace_query_errors_total
+                    .fetch_add(1, Ordering::Relaxed);
+                warn!(metric=%metric_name, error=%e, "failed to query xtrace metrics for reconcile");
+                continue;
+            }
+            QueryResult::Ok(resp) => {
+                if resp.meta.truncated {
+                    metrics
+                        .xtrace_truncated_total
+                        .fetch_add(1, Ordering::Relaxed);
+                    warn!(
+                        metric=%metric_name,
+                        series_count=resp.meta.series_count,
+                        "xtrace metric response truncated for scheduler"
+                    );
+                }
 
-        match client.query_metrics(&q).await {
-            Ok(resp) => {
+                if resp.meta.series_count > 0 {
+                    let latest_ms = resp
+                        .meta
+                        .latest_ts
+                        .as_deref()
+                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                        .map(|dt| dt.timestamp_millis() as u64);
+                    let stale = latest_ms
+                        .map(|ts| now_ms.saturating_sub(ts) > cfg.freshness_ms)
+                        .unwrap_or(true);
+                    if stale {
+                        metrics.xtrace_stale_total.fetch_add(1, Ordering::Relaxed);
+                        warn!(
+                            metric=%metric_name,
+                            latest_ts=?resp.meta.latest_ts,
+                            freshness_ms=cfg.freshness_ms,
+                            "xtrace metric response considered stale for scheduler"
+                        );
+                        continue;
+                    }
+                }
+
                 for series in &resp.data {
-                    let model_uid = series.labels.get("model_uid")
+                    let model_uid = series
+                        .labels
+                        .get("model_uid")
                         .and_then(|v| v.as_str())
                         .unwrap_or_default()
                         .to_string();
-                    let replica_id: u32 = series.labels.get("replica_id")
+                    let replica_id: u32 = series
+                        .labels
+                        .get("replica_id")
                         .and_then(|v| v.as_str())
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(0);
@@ -526,27 +679,24 @@ async fn fetch_stats_from_xtrace(
                     }
 
                     if let Some(last) = series.values.last() {
+                        let _ = &last.timestamp;
                         let key = (model_uid, replica_id);
                         if is_pending {
-                            pending_map.insert(key, last.value as u64);
+                            pending_map.insert(key, last.value.max(0.0) as u64);
                         } else {
-                            kv_usage_map.insert(key, last.value);
+                            kv_usage_map.insert(key, last.value.clamp(0.0, 1.0));
                         }
                     }
                 }
-            }
-            Err(e) => {
-                warn!(metric=%metric_name, error=%e, "failed to query xtrace metrics for reconcile");
             }
         }
     }
 
     // Merge into EndpointStats
-    let mut all_keys: std::collections::HashSet<(String, u32)> = std::collections::HashSet::new();
+    let mut all_keys: HashSet<(String, u32)> = HashSet::new();
     all_keys.extend(pending_map.keys().cloned());
     all_keys.extend(kv_usage_map.keys().cloned());
 
-    let now_ms = now.timestamp_millis() as u64;
     for key in all_keys {
         let pending = pending_map.get(&key).copied().unwrap_or(0);
         let kv_usage = kv_usage_map.get(&key).copied();
@@ -571,10 +721,7 @@ async fn fetch_stats_from_xtrace(
             kv_cache_free_bytes: kv_free,
         };
 
-        stats_by_model
-            .entry(key.0)
-            .or_default()
-            .push(stats);
+        stats_by_model.entry(key.0).or_default().push(stats);
     }
 
     stats_by_model
