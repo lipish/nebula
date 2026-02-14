@@ -154,3 +154,48 @@
 | 日期 | 变更人 | 变更内容 |
 | --- | --- | --- |
 |  |  |  |
+
+## 12) Nebula 降级路径可观测（一页图）
+
+用于统一理解：xtrace 信号异常时，Nebula 走哪条分支，以及应看哪个计数器。
+
+```mermaid
+flowchart TD
+  A[Router/Scheduler query xtrace] --> B{HTTP / payload}
+
+  B -->|200 + fresh| C[使用信号参与路由/调度]
+  B -->|200 + truncated=true| D[继续使用信号 + 记 truncated]
+  B -->|200 + stale latest_ts| E[丢弃该次信号 + 记 stale]
+  B -->|429| F[退避 backoff + 记 rate_limited]
+  B -->|network/5xx/decode| G[降级到无信号路径 + 记 query_errors]
+
+  D --> H[维持服务，提示信号可能被裁剪]
+  E --> I[维持服务，避免用过期数据]
+  F --> J[维持服务，降低对 xtrace 压力]
+  G --> K[维持服务，依赖默认/已有策略]
+```
+
+### 12.1 指标名对照
+
+- Router:
+  - `nebula_router_xtrace_query_errors_total`
+  - `nebula_router_xtrace_rate_limited_total`
+  - `nebula_router_xtrace_stale_total`
+  - `nebula_router_xtrace_truncated_total`
+- Scheduler:
+  - `nebula_scheduler_xtrace_query_errors_total`
+  - `nebula_scheduler_xtrace_rate_limited_total`
+  - `nebula_scheduler_xtrace_stale_total`
+  - `nebula_scheduler_xtrace_truncated_total`
+
+### 12.2 判定口径（当前实现）
+
+- stale：`series_count > 0` 且 `meta.latest_ts` 距今超过 `NEBULA_XTRACE_METRIC_MAX_AGE_MS`。
+- rate_limited：HTTP `429`（优先使用 `Retry-After` 作为退避秒数）。
+- query_errors：请求失败、非 2xx（且非 429）、或响应解析失败。
+- truncated：`meta.truncated = true`。
+
+### 12.3 验收建议
+
+- 至少验证两类场景能稳定抬升计数：`429` 与 `query_errors`。
+- `stale` 若受环境影响难稳定触发，可先以 `query_errors` 证明降级路径已可观测，再单独做 stale 专项注入。
