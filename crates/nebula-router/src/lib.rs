@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dashmap::DashMap;
 use nebula_common::{EndpointInfo, EndpointStats, EndpointStatus, ExecutionContext};
@@ -42,6 +43,8 @@ pub struct Router {
     xtrace_rate_limited_total: AtomicU64,
     xtrace_stale_total: AtomicU64,
     xtrace_truncated_total: AtomicU64,
+    route_stale_stats_dropped_total: AtomicU64,
+    stats_max_age_ms: u64,
 }
 
 impl std::fmt::Debug for Router {
@@ -59,6 +62,15 @@ impl Router {
 
     pub fn with_strategy(strategy: Box<dyn RoutingStrategy>) -> Arc<Self> {
         tracing::info!(strategy = strategy.name(), "router initialized");
+        let stats_max_age_ms = std::env::var("NEBULA_ROUTE_STATS_MAX_AGE_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .or_else(|| {
+                std::env::var("NEBULA_XTRACE_METRIC_MAX_AGE_MS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+            })
+            .unwrap_or(60_000);
         Arc::new(Self {
             endpoints: DashMap::new(),
             stats: DashMap::new(),
@@ -70,6 +82,8 @@ impl Router {
             xtrace_rate_limited_total: AtomicU64::new(0),
             xtrace_stale_total: AtomicU64::new(0),
             xtrace_truncated_total: AtomicU64::new(0),
+            route_stale_stats_dropped_total: AtomicU64::new(0),
+            stats_max_age_ms,
         })
     }
 
@@ -135,6 +149,10 @@ impl Router {
         self.xtrace_truncated_total.load(Ordering::Relaxed)
     }
 
+    pub fn route_stale_stats_dropped_total(&self) -> u64 {
+        self.route_stale_stats_dropped_total.load(Ordering::Relaxed)
+    }
+
     pub fn clear_session_affinity(&self, session_id: &str) {
         self.session_affinity.remove(session_id);
     }
@@ -176,6 +194,33 @@ impl Router {
             .filter(|e| e.key().0 == model_uid)
             .map(|e| e.value().clone())
             .collect()
+    }
+
+    fn get_fresh_stats(&self, model_uid: &str, replica_id: u32) -> Option<EndpointStats> {
+        let stats = self
+            .stats
+            .get(&(model_uid.to_string(), replica_id))
+            .map(|s| s.value().clone())?;
+
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis() as u64;
+        let age_ms = now_ms.saturating_sub(stats.last_updated_ms);
+        if age_ms > self.stats_max_age_ms {
+            self.route_stale_stats_dropped_total
+                .fetch_add(1, Ordering::Relaxed);
+            tracing::debug!(
+                model_uid=%model_uid,
+                replica_id,
+                age_ms,
+                max_age_ms=self.stats_max_age_ms,
+                "dropping stale routing stats"
+            );
+            return None;
+        }
+
+        Some(stats)
     }
 
     /// Check if all endpoints for a model are overloaded based on KV cache usage.
@@ -251,11 +296,7 @@ impl Router {
 
         let stats_snapshot: Vec<Option<EndpointStats>> = filtered
             .iter()
-            .map(|ep| {
-                self.stats
-                    .get(&(ep.model_uid.clone(), ep.replica_id))
-                    .map(|s| s.value().clone())
-            })
+            .map(|ep| self.get_fresh_stats(&ep.model_uid, ep.replica_id))
             .collect();
 
         // Admission control: reject if all endpoints are overloaded
@@ -322,11 +363,7 @@ impl Router {
 
         let stats_snapshot: Vec<Option<EndpointStats>> = filtered
             .iter()
-            .map(|ep| {
-                self.stats
-                    .get(&(ep.model_uid.clone(), ep.replica_id))
-                    .map(|s| s.value().clone())
-            })
+            .map(|ep| self.get_fresh_stats(&ep.model_uid, ep.replica_id))
             .collect();
 
         // Admission control: reject if all endpoints are overloaded

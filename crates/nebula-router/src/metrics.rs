@@ -173,6 +173,12 @@ pub async fn metrics_handler(State(st): State<AppState>) -> impl IntoResponse {
          nebula_router_xtrace_truncated_total {}\n",
         st.router.xtrace_truncated_total(),
     ));
+    body.push_str(&format!(
+        "# HELP nebula_router_route_stale_stats_dropped_total stale routing stats dropped at route-time freshness gate.\n\
+         # TYPE nebula_router_route_stale_stats_dropped_total counter\n\
+         nebula_router_route_stale_stats_dropped_total {}\n",
+        st.router.route_stale_stats_dropped_total(),
+    ));
 
     // Per-model counters
     body.push_str("# HELP nebula_route_total Per-model request count.\n# TYPE nebula_route_total counter\n");
