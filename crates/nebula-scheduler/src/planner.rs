@@ -8,7 +8,7 @@ use nebula_meta::{EtcdMetaStore, MetaStore};
 
 use crate::util::now_ms;
 
-const NODE_STALE_MS: u64 = 10_000;
+const NODE_STALE_MS: u64 = 60_000;
 
 pub async fn list_used_resources(
     store: &EtcdMetaStore,

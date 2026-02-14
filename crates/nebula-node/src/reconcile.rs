@@ -15,9 +15,24 @@ use crate::util::now_ms;
 pub struct RunningModel {
     pub model_uid: String,
     pub replica_id: u32,
-    pub plan_version: u64,
+    pub assignment_signature: String,
     pub handle: EngineHandle,
     pub engine: Arc<dyn Engine>,
+}
+
+fn assignment_signature(assignment: &nebula_common::PlacementAssignment) -> String {
+    serde_json::to_string(assignment).unwrap_or_else(|_| {
+        format!(
+            "replica:{}:node:{}:port:{}:gpu:{:?}:extra:{:?}:engine:{:?}:image:{:?}",
+            assignment.replica_id,
+            assignment.node_id,
+            assignment.port,
+            assignment.effective_gpu_indices(),
+            assignment.extra_args,
+            assignment.engine_type,
+            assignment.docker_image
+        )
+    })
 }
 
 async fn mark_request_failed(store: &EtcdMetaStore, request_id: &str, reason: String) {
@@ -77,8 +92,9 @@ pub async fn reconcile_model(
         return Ok(());
     };
 
+    let desired_signature = assignment_signature(assignment);
     let needs_restart = match running.get(model_uid) {
-        Some(rm) => rm.replica_id != assignment.replica_id || rm.plan_version != plan.version,
+        Some(rm) => rm.replica_id != assignment.replica_id || rm.assignment_signature != desired_signature,
         None => true,
     };
 
@@ -209,7 +225,7 @@ pub async fn reconcile_model(
         RunningModel {
             model_uid: plan.model_uid,
             replica_id: assignment.replica_id,
-            plan_version: plan.version,
+            assignment_signature: desired_signature,
             handle,
             engine,
         },

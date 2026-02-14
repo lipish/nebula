@@ -26,7 +26,7 @@ pub struct Args {
     #[arg(long, default_value = "/tmp/nebula/engine.env")]
     pub engine_env_path: String,
 
-    #[arg(long, default_value_t = 10_000)]
+    #[arg(long, default_value_t = 60_000)]
     pub heartbeat_ttl_ms: u64,
 
     #[arg(long, default_value_t = 3_000)]

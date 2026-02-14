@@ -32,7 +32,7 @@ export function ModelsView({
     onSelectModel,
 }: ModelsProps) {
     const [models, setModels] = useState<ModelView[]>([])
-    const [loading, setLoading] = useState(true)
+    const [initialLoading, setInitialLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [acting, setActing] = useState<string | null>(null)
     const [filter, setFilter] = useState<AggregatedModelState | "all">("all")
@@ -45,7 +45,7 @@ export function ModelsView({
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to load models")
         } finally {
-            setLoading(false)
+            setInitialLoading(false)
         }
     }, [token])
 
@@ -126,7 +126,7 @@ export function ModelsView({
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {loading ? (
+                        {initialLoading ? (
                             <TableRow>
                                 <TableCell colSpan={5} className="h-48 text-center">
                                     <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2 text-muted-foreground" />

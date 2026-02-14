@@ -166,8 +166,10 @@ fn compute_aggregated_state(
         return AggregatedModelState::Degraded;
     }
 
-    // No ready endpoints
-    let elapsed = now_ms().saturating_sub(spec_created_at_ms);
+    // No ready endpoints. Measure elapsed from most recent desired-state update,
+    // not from model creation time, so restarts don't look immediately failed.
+    let base_ts = dep.updated_at_ms.max(spec_created_at_ms);
+    let elapsed = now_ms().saturating_sub(base_ts);
     if total_count == 0 && elapsed > FAILED_THRESHOLD_MS {
         return AggregatedModelState::Failed;
     }

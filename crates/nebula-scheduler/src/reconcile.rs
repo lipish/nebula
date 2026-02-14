@@ -16,7 +16,12 @@ use crate::planner::{allocate_port, list_used_resources, select_node_and_gpus};
 use crate::util::now_ms;
 
 /// Endpoint heartbeat timeout: if last_heartbeat_ms is older than this, consider it dead.
-const ENDPOINT_TIMEOUT_MS: u64 = 30_000;
+/// Keep this generous to avoid reclaiming assignments during cold starts.
+const ENDPOINT_TIMEOUT_MS: u64 = 300_000;
+
+/// Startup grace period for assignments with no endpoint yet.
+/// Large-model cold starts (download + compile + graph capture) can exceed minutes.
+const STARTUP_GRACE_MS: u64 = 900_000;
 
 /// Reconcile interval.
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
@@ -178,14 +183,14 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
                 }
                 None => {
                     // No endpoint registered yet — could be still starting.
-                    // Only remove if the plan is old enough (give 2 minutes for startup).
+                    // Only remove if the plan is old enough (keep a generous startup grace).
                     let plan_age = now.saturating_sub(plan.version);
-                    if plan_age > 120_000 {
+                    if plan_age > STARTUP_GRACE_MS {
                         warn!(
                             model_uid=%plan.model_uid,
                             replica_id=assignment.replica_id,
                             plan_age_ms=plan_age,
-                            "no endpoint registered after 2min, removing assignment"
+                            "no endpoint registered after startup grace period, removing assignment"
                         );
                         stale_replica_ids.push(assignment.replica_id);
                         metrics.unhealthy_endpoints_total.fetch_add(1, Ordering::Relaxed);

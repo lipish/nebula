@@ -128,20 +128,26 @@ pub async fn heartbeat_loop(
             tracing::warn!(error=%e, "failed to write heartbeat");
         }
 
-        // Refresh endpoint registrations
-        let mut guard = endpoint.lock().await;
-        for info in guard.values_mut() {
-            info.last_heartbeat_ms = now_ms();
-            if let Err(e) = register_endpoint(&store, info, ttl_ms).await {
-                tracing::warn!(error=%e, "failed to refresh endpoint");
+        // Refresh endpoint registrations (best-effort; never block heartbeat loop).
+        if let Ok(mut guard) = endpoint.try_lock() {
+            for info in guard.values_mut() {
+                info.last_heartbeat_ms = now_ms();
+                if let Err(e) = register_endpoint(&store, info, ttl_ms).await {
+                    tracing::warn!(error=%e, "failed to refresh endpoint");
+                }
             }
+        } else {
+            tracing::debug!("skipping endpoint refresh: endpoint state lock busy");
         }
-        drop(guard);
 
         // Scrape engine metrics and write to etcd /stats/
         // Also perform health checks on each running engine
         {
-            let running_guard = running.lock().await;
+            let Ok(running_guard) = running.try_lock() else {
+                tracing::debug!("skipping engine health/stats: running state lock busy");
+                tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+                continue;
+            };
             let now = now_ms();
             for rm in running_guard.values() {
                 // Skip health check during restart cooldown
