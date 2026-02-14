@@ -115,7 +115,11 @@ fn model_name_matches(cache_name: &str, spec_name: &str) -> bool {
     let cache_tail = cache_lc.rsplit('/').next().unwrap_or_default();
     let spec_tail = spec_lc.rsplit('/').next().unwrap_or_default();
 
-    cache_tail == spec_tail || cache_tail == spec_lc || spec_tail == cache_lc
+    cache_tail == spec_tail
+        || cache_tail == spec_lc
+        || spec_tail == cache_lc
+        || spec_lc.starts_with(&(cache_lc.clone() + "/"))
+        || cache_lc.starts_with(&(spec_lc + "/"))
 }
 
 // ---------------------------------------------------------------------------
