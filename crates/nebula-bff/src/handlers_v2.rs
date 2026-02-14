@@ -101,6 +101,23 @@ fn is_valid_model_uid(uid: &str) -> bool {
     true
 }
 
+fn model_name_matches(cache_name: &str, spec_name: &str) -> bool {
+    if cache_name == spec_name {
+        return true;
+    }
+
+    let cache_lc = cache_name.to_lowercase();
+    let spec_lc = spec_name.to_lowercase();
+    if cache_lc == spec_lc {
+        return true;
+    }
+
+    let cache_tail = cache_lc.rsplit('/').next().unwrap_or_default();
+    let spec_tail = spec_lc.rsplit('/').next().unwrap_or_default();
+
+    cache_tail == spec_tail || cache_tail == spec_lc || spec_tail == cache_lc
+}
+
 // ---------------------------------------------------------------------------
 // Aggregated State
 // ---------------------------------------------------------------------------
@@ -236,7 +253,15 @@ pub struct CacheSummary {
     pub total_cached_models: usize,
     pub total_cache_size_bytes: u64,
     pub nodes: Vec<NodeDiskStatus>,
-    pub caches: Vec<ModelCacheEntry>,
+    pub caches: Vec<CacheEntryView>,
+}
+
+#[derive(Serialize)]
+pub struct CacheEntryView {
+    #[serde(flatten)]
+    pub entry: ModelCacheEntry,
+    #[serde(default)]
+    pub matched_model_uids: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -649,7 +674,7 @@ pub async fn get_model(
         .unwrap_or_default()
         .into_iter()
         .filter_map(|(_, v, _)| serde_json::from_slice(&v).ok())
-        .filter(|c: &ModelCacheEntry| c.model_name == spec.model_name)
+        .filter(|c: &ModelCacheEntry| model_name_matches(&c.model_name, &spec.model_name))
         .collect();
 
     let state = compute_aggregated_state(
@@ -1613,13 +1638,35 @@ pub async fn cache_summary(
         return resp;
     }
 
-    let caches: Vec<ModelCacheEntry> = st
+    let cache_entries: Vec<ModelCacheEntry> = st
         .store
         .list_prefix("/model_cache/")
         .await
         .unwrap_or_default()
         .into_iter()
         .filter_map(|(_, v, _)| serde_json::from_slice(&v).ok())
+        .collect();
+
+    let specs_raw = st.store.list_prefix("/models/").await.unwrap_or_default();
+    let specs: Vec<ModelSpec> = specs_raw
+        .into_iter()
+        .filter(|(k, _, _)| k.ends_with("/spec"))
+        .filter_map(|(_, v, _)| serde_json::from_slice(&v).ok())
+        .collect();
+
+    let caches: Vec<CacheEntryView> = cache_entries
+        .into_iter()
+        .map(|entry| {
+            let matched_model_uids = specs
+                .iter()
+                .filter(|spec| model_name_matches(&entry.model_name, &spec.model_name))
+                .map(|spec| spec.model_uid.clone())
+                .collect();
+            CacheEntryView {
+                entry,
+                matched_model_uids,
+            }
+        })
         .collect();
 
     let nodes: Vec<NodeDiskStatus> = st
@@ -1631,7 +1678,7 @@ pub async fn cache_summary(
         .filter_map(|(_, v, _)| serde_json::from_slice(&v).ok())
         .collect();
 
-    let total_size: u64 = caches.iter().map(|c| c.size_bytes).sum();
+    let total_size: u64 = caches.iter().map(|c| c.entry.size_bytes).sum();
 
     let summary = CacheSummary {
         total_cached_models: caches.len(),

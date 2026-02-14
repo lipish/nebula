@@ -20,6 +20,7 @@ interface CacheSummary {
     model_name: string
     node_id: string
     size_bytes: number
+    matched_model_uids?: string[]
   }>
 }
 
@@ -73,8 +74,13 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
     }
   }
 
-  const cacheMap = useCallback((modelName: string) => {
-    const matched = (cacheSummary?.caches || []).filter((item) => item.model_name === modelName)
+  const cacheMap = useCallback((modelUid: string, modelName: string) => {
+    const matched = (cacheSummary?.caches || []).filter((item) => {
+      if ((item.matched_model_uids || []).includes(modelUid)) {
+        return true
+      }
+      return item.model_name === modelName
+    })
     return {
       nodes: new Set(matched.map((item) => item.node_id)).size,
       bytes: matched.reduce((sum, item) => sum + item.size_bytes, 0),
@@ -161,7 +167,7 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
             ) : (
               models.map((model) => {
                 const acting = actingUid === model.model_uid
-                const cache = cacheMap(model.model_name)
+                const cache = cacheMap(model.model_uid, model.model_name)
                 return (
                   <TableRow key={model.model_uid}>
                     <TableCell className="py-4">
