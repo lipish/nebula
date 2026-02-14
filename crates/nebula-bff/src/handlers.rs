@@ -11,6 +11,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::auth::{require_role, AuthContext, Role};
+use crate::args::XtraceAuthMode;
 use crate::state::AppState;
 use nebula_common::{
     ClusterStatus, EndpointInfo, EndpointStats, ModelLoadRequest, ModelRequest, ModelRequestStatus,
@@ -531,7 +532,11 @@ async fn load_model_with_request(
     (StatusCode::OK, Json(json!({"request_id": request_id, "status": "pending"}))).into_response()
 }
 
-/// Generic helper: proxy a GET request to xtrace, forwarding query string and bearer token.
+/// Generic helper: proxy a GET request to xtrace, forwarding query string.
+///
+/// Auth behavior:
+/// - service: require and send `XTRACE_TOKEN`
+/// - internal: do not send auth header
 async fn xtrace_proxy_get(st: &AppState, path: &str, raw_query: Option<&str>) -> Response {
     let base = st.xtrace_url.trim_end_matches('/');
     let url = match raw_query {
@@ -540,8 +545,18 @@ async fn xtrace_proxy_get(st: &AppState, path: &str, raw_query: Option<&str>) ->
     };
 
     let mut req = st.http.get(&url);
-    if !st.xtrace_token.is_empty() {
-        req = req.bearer_auth(&st.xtrace_token);
+    match st.xtrace_auth_mode {
+        XtraceAuthMode::Service => {
+            if st.xtrace_token.is_empty() {
+                return error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "misconfigured",
+                    "XTRACE_AUTH_MODE=service requires XTRACE_TOKEN",
+                );
+            }
+            req = req.bearer_auth(&st.xtrace_token);
+        }
+        XtraceAuthMode::Internal => {}
     }
 
     let resp = match req.send().await {

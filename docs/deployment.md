@@ -21,6 +21,7 @@ cargo build --workspace
 - `nebula-node`
 - `nebula-router`
 - `nebula-gateway`
+- `nebula-bff`
 
 ## 3. 启动 etcd
 
@@ -153,7 +154,41 @@ open http://127.0.0.1:8081/v1/admin/ui
 ```
 ```
 
-## 5. 快速验证
+## 5. BFF 与 xtrace 鉴权模式（安装部署建议）
+
+BFF 提供 `/api/v2/*`、`/api/audit-logs`、`/api/observe/*` 等管理与观测接口，访问 xtrace 时支持两种模式：
+
+- `XTRACE_AUTH_MODE=internal`：内网信任模式，不向 xtrace 发送 Bearer token（开发环境推荐）
+- `XTRACE_AUTH_MODE=service`：服务鉴权模式，必须配置 `XTRACE_TOKEN`（生产环境推荐）
+
+### 开发环境推荐（默认）
+
+```bash
+export XTRACE_URL=http://127.0.0.1:8742
+export XTRACE_AUTH_MODE=internal
+
+./target/debug/nebula-bff \
+  --listen-addr 0.0.0.0:18090 \
+  --etcd-endpoint http://127.0.0.1:2379 \
+  --router-url http://127.0.0.1:18081
+```
+
+### 生产环境推荐
+
+```bash
+export XTRACE_URL=http://xtrace:8742
+export XTRACE_AUTH_MODE=service
+export XTRACE_TOKEN=<your-internal-service-token>
+
+./target/debug/nebula-bff \
+  --listen-addr 0.0.0.0:18090 \
+  --etcd-endpoint http://127.0.0.1:2379 \
+  --router-url http://127.0.0.1:18081
+```
+
+当 `XTRACE_AUTH_MODE=service` 且 `XTRACE_TOKEN` 为空时，BFF 会返回配置错误，避免误以为是权限问题。
+
+## 6. 快速验证
 
 ### 非流式 Chat
 
@@ -190,23 +225,25 @@ curl -N http://127.0.0.1:8081/v1/responses \
   }'
 ```
 
-## 6. 端口汇总
+## 7. 端口汇总
 
 | 服务 | 默认端口 | 说明 |
 |------|----------|------|
 | etcd | 2379 | 元数据存储 |
 | vLLM | 10814 | 模型推理（由 node 自动启动） |
 | Router | 18081 | 请求路由 |
+| BFF | 18090 | 管理与 v2 API（审计/观测/模型管理） |
 | Gateway | 8081 | 对外 API 入口 |
+| xtrace | 8742 | 审计与观测后端 |
 
-## 7. 常见问题
+## 8. 常见问题
 
 ### 端口被占用
 
 启动前检查端口是否空闲：
 
 ```bash
-ss -tlnp | grep -E '(8081|18081|10814)'
+ss -tlnp | grep -E '(8081|18090|18081|10814|8742)'
 ```
 
 如有残留进程，先清理：
@@ -243,12 +280,40 @@ RUST_BACKTRACE=1 ./target/debug/nebula-router --listen 0.0.0.0:18081 --etcd-endp
 
 ---
 
-## 8. Docker Compose（控制面）
+## 9. Docker Compose（控制面）
 
-提供基础控制面编排（不含 GPU 的 nebula-node / vLLM）。
+提供基础控制面编排（含 etcd/gateway/router/scheduler/bff，不含 GPU 的 nebula-node / vLLM）。
 
 ```bash
 docker compose up -d --build
 ```
+
+开发环境可直接：
+
+```bash
+XTRACE_AUTH_MODE=internal docker compose up -d --build
+```
+
+生产建议：
+
+```bash
+XTRACE_AUTH_MODE=service \
+XTRACE_TOKEN=<internal-service-token> \
+XTRACE_URL=<xtrace-endpoint> \
+docker compose up -d --build
+```
+
+如需在 compose 内同时启动 xtrace（可选）：
+
+```bash
+XTRACE_URL=http://xtrace:8742 \
+XTRACE_AUTH_MODE=service \
+XTRACE_TOKEN=<internal-service-token> \
+docker compose --profile observe up -d --build
+```
+
+可选环境变量：
+- `XTRACE_IMAGE`：xtrace 镜像地址（默认 `ghcr.io/lipish/xtrace:latest`）
+- `XTRACE_DATABASE_URL`：xtrace 数据库连接串
 
 默认使用 `NEBULA_AUTH_TOKENS="devtoken:admin,viewtoken:viewer"`，可在 `docker-compose.yml` 中调整。

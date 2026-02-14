@@ -155,7 +155,7 @@ export interface DownloadProgress {
   phase: 'downloading' | 'verifying' | 'complete' | 'failed'
   total_bytes: number
   downloaded_bytes: number
-  file_count: number
+  files_total: number
   files_done: number
   updated_at_ms: number
 }

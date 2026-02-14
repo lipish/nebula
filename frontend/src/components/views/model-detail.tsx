@@ -137,7 +137,7 @@ export function ModelDetailView_Page({ modelUid, token, onBack }: ModelDetailPro
                                 <div key={`${dp.replica_id}-${dp.node_id}`} className="space-y-1">
                                     <div className="flex items-center justify-between text-xs">
                                         <span className="font-medium">Replica {dp.replica_id} on {dp.node_id}</span>
-                                        <span className="text-muted-foreground">{fmtBytes(dp.downloaded_bytes)} / {fmtBytes(dp.total_bytes)} ({pct}%) · {dp.files_done}/{dp.file_count} files</span>
+                                        <span className="text-muted-foreground">{fmtBytes(dp.downloaded_bytes)} / {fmtBytes(dp.total_bytes)} ({pct}%) · {dp.files_done}/{dp.files_total} files</span>
                                     </div>
                                     <Progress value={pct} className="h-2" />
                                 </div>

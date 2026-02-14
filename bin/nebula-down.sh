@@ -5,6 +5,9 @@ echo "Stopping Nebula Service Stack..."
 echo "Stopping Gateway..."
 pkill -f "nebula-gateway" || echo "Gateway not running"
 
+echo "Stopping BFF..."
+pkill -f "nebula-bff" || echo "BFF not running"
+
 echo "Stopping Scheduler..."
 pkill -f "nebula-scheduler" || echo "Scheduler not running"
 

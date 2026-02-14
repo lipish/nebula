@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use reqwest::Client;
 
+use crate::args::XtraceAuthMode;
 use nebula_common::auth::AuthConfig;
 use nebula_meta::EtcdMetaStore;
 
@@ -13,6 +14,7 @@ pub struct AppState {
     pub auth: AuthConfig,
     pub xtrace_url: String,
     pub xtrace_token: String,
+    pub xtrace_auth_mode: XtraceAuthMode,
 }
 
 impl AsRef<AuthConfig> for AppState {

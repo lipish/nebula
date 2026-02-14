@@ -53,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
         auth,
         xtrace_url: args.xtrace_url,
         xtrace_token: args.xtrace_token,
+        xtrace_auth_mode: args.xtrace_auth_mode,
     };
 
     let protected_routes = Router::new()

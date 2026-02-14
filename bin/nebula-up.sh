@@ -4,11 +4,23 @@ set -e
 # Configuration
 ETCD_ENDPOINT="http://127.0.0.1:2379"
 GATEWAY_PORT=8081
+BFF_PORT=18090
 ROUTER_PORT=18081
 NODE_PORT=10824
 MODEL_UID="qwen2_5_0_5b"
 MODEL_NAME="Qwen/Qwen2.5-0.5B-Instruct"
 NODE_ID="node_gpu0"
+
+# xtrace config for observability/audit APIs.
+# XTRACE_TOKEN is the bearer token used when Nebula calls xtrace.
+# Example: export XTRACE_TOKEN="nebula-xtrace-token-2026"
+XTRACE_URL="${XTRACE_URL:-http://127.0.0.1:8742}"
+XTRACE_TOKEN="${XTRACE_TOKEN:-}"
+XTRACE_AUTH_MODE="${XTRACE_AUTH_MODE:-internal}"
+
+# Set START_BFF=1 to run nebula-bff locally (recommended for frontend /api + /api/v2).
+# Example: START_BFF=1 XTRACE_TOKEN=nebula-xtrace-token-2026 ./bin/nebula-up.sh
+START_BFF="${START_BFF:-0}"
 
 # Paths (adjust these if running on a different machine)
 NEBULA_ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,6 +30,13 @@ mkdir -p "$LOG_DIR"
 
 echo "Starting Nebula Service Stack..."
 echo "Logs will be written to $LOG_DIR"
+echo "xtrace url: $XTRACE_URL"
+echo "xtrace auth mode: $XTRACE_AUTH_MODE"
+if [ -z "$XTRACE_TOKEN" ]; then
+    echo "xtrace token: (empty)"
+else
+    echo "xtrace token: (configured)"
+fi
 
 # 1. Start Etcd
 if pgrep -x "etcd" > /dev/null; then
@@ -41,10 +60,25 @@ nohup "$NEBULA_ROOT/target/release/nebula-scheduler" \
     --default-node-id "$NODE_ID" \
     --default-port "$NODE_PORT" > "$LOG_DIR/scheduler.log" 2>&1 &
 
+# 2.6 Start BFF (optional)
+if [ "$START_BFF" = "1" ]; then
+    echo "Starting Nebula BFF..."
+    nohup "$NEBULA_ROOT/target/release/nebula-bff" \
+        --listen-addr "0.0.0.0:$BFF_PORT" \
+        --etcd-endpoint "$ETCD_ENDPOINT" \
+        --router-url "http://127.0.0.1:$ROUTER_PORT" \
+        --xtrace-url "$XTRACE_URL" \
+        --xtrace-token "$XTRACE_TOKEN" \
+        --xtrace-auth-mode "$XTRACE_AUTH_MODE" > "$LOG_DIR/bff.log" 2>&1 &
+fi
+
 # 3. Start Gateway
 nohup "$NEBULA_ROOT/target/release/nebula-gateway" \
     --listen-addr "0.0.0.0:$GATEWAY_PORT" \
-    --router-url "http://127.0.0.1:$ROUTER_PORT" > "$LOG_DIR/gateway.log" 2>&1 &
+    --router-url "http://127.0.0.1:$ROUTER_PORT" \
+    --bff-url "http://127.0.0.1:$BFF_PORT" \
+    --xtrace-url "$XTRACE_URL" \
+    --xtrace-token "$XTRACE_TOKEN" > "$LOG_DIR/gateway.log" 2>&1 &
 
 # 4. Start Node (docker mode — all vLLM runs inside containers)
 VLLM_IMAGE="vllm/vllm-openai:v0.11.0"
@@ -62,5 +96,8 @@ nohup "$NEBULA_ROOT/target/release/nebula-node" \
 
 echo "All services started!"
 echo "Gateway: http://127.0.0.1:$GATEWAY_PORT"
+if [ "$START_BFF" = "1" ]; then
+    echo "BFF:     http://127.0.0.1:$BFF_PORT"
+fi
 echo "Router:  http://127.0.0.1:$ROUTER_PORT"
 echo "Node:    $NODE_ID (Model: $MODEL_NAME)"

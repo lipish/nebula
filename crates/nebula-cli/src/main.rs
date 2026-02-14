@@ -85,8 +85,8 @@ async fn main() -> Result<()> {
                 let mut body = serde_json::json!({
                     "model_name": name,
                     "engine_type": engine,
-                    "source": source,
-                    "start": start,
+                    "model_source": source,
+                    "auto_start": start,
                 });
                 if let Some(u) = &uid {
                     body["model_uid"] = serde_json::json!(u);
@@ -244,7 +244,7 @@ async fn main() -> Result<()> {
                     "name": name,
                     "model_name": model_name,
                     "engine_type": engine,
-                    "source": source,
+                    "model_source": source,
                 });
                 let resp = auth(client.post(&url), token.as_ref())
                     .json(&body)
