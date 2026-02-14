@@ -17,6 +17,8 @@ import { EndpointsView } from '@/components/views/endpoints'
 import { AuditView } from '@/components/views/audit'
 import { ImagesView } from '@/components/views/images'
 import { TemplatesView } from '@/components/views/templates'
+import { ModelCatalogView } from '@/components/views/model-catalog'
+import { ModelLibraryView } from '@/components/views/model-library'
 
 const EMPTY_OVERVIEW: ClusterStatus = {
   nodes: [],
@@ -25,7 +27,7 @@ const EMPTY_OVERVIEW: ClusterStatus = {
   model_requests: [],
 }
 
-type Page = 'dashboard' | 'models' | 'model-detail' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images' | 'templates'
+type Page = 'dashboard' | 'models' | 'model-detail' | 'model-catalog' | 'model-library' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images' | 'templates'
 
 const fmtTime = (v: number) => (v ? new Date(v).toLocaleString() : 'n/a')
 
@@ -240,6 +242,25 @@ function App() {
         )}
         {page === 'templates' && (
           <TemplatesView token={token} />
+        )}
+        {page === 'model-catalog' && (
+          <ModelCatalogView
+            token={token}
+            onOpenModels={() => setPage('model-library')}
+            onSelectModel={(uid) => {
+              setSelectedModelUid(uid)
+              setPage('model-detail')
+            }}
+          />
+        )}
+        {page === 'model-library' && (
+          <ModelLibraryView
+            token={token}
+            onOpenService={(uid) => {
+              setSelectedModelUid(uid)
+              setPage('model-detail')
+            }}
+          />
         )}
       </main>
     </div>

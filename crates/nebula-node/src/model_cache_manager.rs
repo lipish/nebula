@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use nebula_common::{
@@ -25,6 +26,14 @@ const DOWNLOAD_PROGRESS_UPDATE_INTERVAL: Duration = Duration::from_secs(3);
 const DISK_WARNING_THRESHOLD: f64 = 85.0;
 const DISK_CRITICAL_THRESHOLD: f64 = 95.0;
 const MAX_DOWNLOAD_RETRIES: u32 = 3;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ModelGcRequest {
+    model_uid: String,
+    model_name: String,
+    model_path: Option<String>,
+    requested_at_ms: u64,
+}
 
 // ---------------------------------------------------------------------------
 // Cache scan loop (spawned at startup)
@@ -47,6 +56,8 @@ async fn scan_and_report(
     node_id: &str,
     model_dir: &str,
 ) -> anyhow::Result<()> {
+    process_gc_requests(store, node_id, model_dir).await;
+
     let base = Path::new(model_dir);
     let mut found_keys: HashSet<String> = HashSet::new();
     let mut total_cache_bytes: u64 = 0;
@@ -70,6 +81,125 @@ async fn scan_and_report(
 
     tracing::debug!(model_count, total_cache_bytes, "model cache scan complete");
     Ok(())
+}
+
+async fn process_gc_requests(store: &EtcdMetaStore, node_id: &str, model_dir: &str) {
+    let prefix = format!("/model_gc_requests/{node_id}/");
+    let requests = match store.list_prefix(&prefix).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error=%e, %node_id, "failed to list model GC requests");
+            return;
+        }
+    };
+
+    for (key, val, _) in requests {
+        let req = match serde_json::from_slice::<ModelGcRequest>(&val) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error=%e, %key, "invalid model GC request payload");
+                continue;
+            }
+        };
+
+        match purge_model_cache_files(
+            store,
+            node_id,
+            model_dir,
+            &req.model_name,
+            req.model_path.as_deref(),
+        )
+        .await
+        {
+            Ok(removed) => {
+                tracing::info!(
+                    %node_id,
+                    %req.model_uid,
+                    model_name=%req.model_name,
+                    removed,
+                    "model GC request processed"
+                );
+                let _ = store.delete(&key).await;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error=%e,
+                    %node_id,
+                    %req.model_uid,
+                    model_name=%req.model_name,
+                    "failed to process model GC request"
+                );
+            }
+        }
+    }
+}
+
+async fn purge_model_cache_files(
+    store: &EtcdMetaStore,
+    node_id: &str,
+    model_dir: &str,
+    model_name: &str,
+    model_path: Option<&str>,
+) -> anyhow::Result<usize> {
+    let prefix = format!("/model_cache/{node_id}/");
+    let entries = store.list_prefix(&prefix).await?;
+    let model_dir_canon = std::fs::canonicalize(model_dir).unwrap_or_else(|_| Path::new(model_dir).to_path_buf());
+
+    let mut removed = 0usize;
+    for (key, val, _) in entries {
+        let entry = match serde_json::from_slice::<ModelCacheEntry>(&val) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let matches_name = entry.model_name == model_name
+            || model_name
+                .rsplit('/')
+                .next()
+                .map(|tail| entry.model_name == tail)
+                .unwrap_or(false)
+            || entry
+                .model_name
+                .rsplit('/')
+                .next()
+                .map(|tail| tail == model_name)
+                .unwrap_or(false);
+        let matches_path = model_path
+            .map(|p| p == entry.cache_path)
+            .unwrap_or(false);
+        if !matches_name && !matches_path {
+            continue;
+        }
+
+        let cache_path = Path::new(&entry.cache_path);
+        if cache_path.exists() {
+            let target_canon = match std::fs::canonicalize(cache_path) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(error=%e, path=%entry.cache_path, "failed to canonicalize cache path");
+                    continue;
+                }
+            };
+            if !target_canon.starts_with(&model_dir_canon) {
+                tracing::warn!(
+                    path=%entry.cache_path,
+                    model_dir=%model_dir,
+                    "refusing to delete cache path outside model_dir"
+                );
+                continue;
+            }
+
+            if target_canon.is_dir() {
+                std::fs::remove_dir_all(&target_canon)?;
+            } else if target_canon.is_file() {
+                std::fs::remove_file(&target_canon)?;
+            }
+            removed += 1;
+        }
+
+        let _ = store.delete(&key).await;
+    }
+
+    Ok(removed)
 }
 
 
@@ -547,12 +677,28 @@ pub async fn download_model_if_needed(
     use_modelscope: bool,
 ) -> anyhow::Result<String> {
     let _ = use_modelscope; // reserved for future per-call override
-    // Unified cache check: look in both HF and ModelScope caches regardless of source.
-    if let Some(path) = find_hf_cached_model(model_name, model_dir)
-        .or_else(|| find_modelscope_cached_model(model_name, model_dir))
-    {
-        tracing::info!(%model_uid, %path, source=?model_source, "model already cached (unified check)");
-        return Ok(path);
+
+    let effective_model_dir = if matches!(model_source, ModelSource::Local) {
+        model_dir
+    } else {
+        model_path
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .unwrap_or(model_dir)
+    };
+
+    if !matches!(model_source, ModelSource::Local) {
+        if let Err(e) = std::fs::create_dir_all(effective_model_dir) {
+            anyhow::bail!("failed to create model directory '{}': {}", effective_model_dir, e);
+        }
+
+        // Unified cache check: look in both HF and ModelScope caches regardless of source.
+        if let Some(path) = find_hf_cached_model(model_name, effective_model_dir)
+            .or_else(|| find_modelscope_cached_model(model_name, effective_model_dir))
+        {
+            tracing::info!(%model_uid, %path, source=?model_source, model_dir=%effective_model_dir, "model already cached (unified check)");
+            return Ok(path);
+        }
     }
 
     match model_source {
@@ -570,7 +716,7 @@ pub async fn download_model_if_needed(
         ModelSource::HuggingFace => {
             // Try HuggingFace first, fallback to ModelScope on failure
             match download_hf_model(
-                store, node_id, model_uid, model_name, model_dir, replica_id, hf_endpoint,
+                store, node_id, model_uid, model_name, effective_model_dir, replica_id, hf_endpoint,
             )
             .await
             {
@@ -581,7 +727,7 @@ pub async fn download_model_if_needed(
                         "HuggingFace download failed, falling back to ModelScope"
                     );
                     download_modelscope_model(
-                        store, node_id, model_uid, model_name, model_dir, replica_id,
+                        store, node_id, model_uid, model_name, effective_model_dir, replica_id,
                     )
                     .await
                     .map_err(|ms_err| {
@@ -596,7 +742,7 @@ pub async fn download_model_if_needed(
         ModelSource::ModelScope => {
             // Try ModelScope first, fallback to HuggingFace on failure
             match download_modelscope_model(
-                store, node_id, model_uid, model_name, model_dir, replica_id,
+                store, node_id, model_uid, model_name, effective_model_dir, replica_id,
             )
             .await
             {
@@ -607,7 +753,7 @@ pub async fn download_model_if_needed(
                         "ModelScope download failed, falling back to HuggingFace"
                     );
                     download_hf_model(
-                        store, node_id, model_uid, model_name, model_dir, replica_id, hf_endpoint,
+                        store, node_id, model_uid, model_name, effective_model_dir, replica_id, hf_endpoint,
                     )
                     .await
                     .map_err(|hf_err| {

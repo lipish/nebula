@@ -117,6 +117,9 @@ export const v2 = {
   createModel: (body: Record<string, unknown>, token?: string) =>
     apiPost<unknown, Record<string, unknown>>('/v2/models', body, token),
 
+  updateModel: (uid: string, body: Record<string, unknown>, token?: string) =>
+    apiPut<unknown, Record<string, unknown>>(`/v2/models/${uid}`, body, token),
+
   startModel: (uid: string, body?: Record<string, unknown>, token?: string) =>
     apiPost<unknown, Record<string, unknown>>(`/v2/models/${uid}/start`, body || {}, token),
 

@@ -43,11 +43,17 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
 
     // Disk alerts from v2
     const [diskAlerts, setDiskAlerts] = useState<DiskAlert[]>([])
-    useEffect(() => {
+    const refreshDiskAlerts = useCallback(() => {
         v2.listAlerts(token)
             .then(setDiskAlerts)
             .catch(() => setDiskAlerts([]))
     }, [token])
+
+    useEffect(() => {
+        refreshDiskAlerts()
+        const id = setInterval(refreshDiskAlerts, 30000)
+        return () => clearInterval(id)
+    }, [refreshDiskAlerts])
 
     // GPU utilization trend data from xtrace
     const [gpuTrend, setGpuTrend] = useState<{ time: string; utilization: number; temperature: number }[]>([])

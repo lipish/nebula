@@ -31,9 +31,10 @@ pub struct ModelSpec {
     /// Model file source — determines download strategy on Node.
     pub model_source: ModelSource,
 
-    /// Only used when `model_source` is `Local`.
-    /// Absolute path to model files on the node (e.g. "/DATA/Model/Qwen2.5-7B-Instruct/").
-    /// For `HuggingFace`/`ModelScope` sources this is null — download path is inferred from `model_name`.
+    /// For `Local` source: absolute path to model files on the node
+    /// (e.g. "/DATA/Model/Qwen2.5-7B-Instruct/").
+    /// For `HuggingFace`/`ModelScope` sources: optional override for download/cache root directory.
+    /// If not set, node default model directory is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_path: Option<String>,
 

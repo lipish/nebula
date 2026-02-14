@@ -237,6 +237,14 @@ pub struct CacheSummary {
     pub caches: Vec<ModelCacheEntry>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ModelGcRequest {
+    model_uid: String,
+    model_name: String,
+    model_path: Option<String>,
+    requested_at_ms: u64,
+}
+
 
 // ---------------------------------------------------------------------------
 // Request types
@@ -793,9 +801,47 @@ pub async fn delete_model(
         return resp;
     }
 
-    // Verify exists
-    if let Ok(None) = st.store.get(&format!("/models/{model_uid}/spec")).await {
-        return error_response(StatusCode::NOT_FOUND, "not_found", "model not found");
+    // Verify exists and read model spec for cache GC.
+    let spec: ModelSpec = match st.store.get(&format!("/models/{model_uid}/spec")).await {
+        Ok(Some((data, _))) => match serde_json::from_slice(&data) {
+            Ok(s) => s,
+            Err(e) => {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "deserialization_error",
+                    &format!("deserialization error: {e}"),
+                )
+            }
+        },
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "not_found", "model not found"),
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "etcd_error",
+                &format!("etcd error: {e}"),
+            )
+        }
+    };
+
+    // Enqueue per-node model cache GC requests.
+    let mut queued_gc_nodes: usize = 0;
+    if let Ok(nodes) = st.store.list_prefix("/node_disk/").await {
+        let req = ModelGcRequest {
+            model_uid: model_uid.clone(),
+            model_name: spec.model_name.clone(),
+            model_path: spec.model_path.clone(),
+            requested_at_ms: now_ms(),
+        };
+        if let Ok(payload) = serde_json::to_vec(&req) {
+            for (key, _, _) in nodes {
+                if let Some(node_id) = key.strip_prefix("/node_disk/").filter(|id| !id.is_empty()) {
+                    let gc_key = format!("/model_gc_requests/{node_id}/{model_uid}");
+                    if st.store.put(&gc_key, payload.clone(), None).await.is_ok() {
+                        queued_gc_nodes += 1;
+                    }
+                }
+            }
+        }
     }
 
     // Delete all related keys
@@ -827,7 +873,7 @@ pub async fn delete_model(
 
     (
         StatusCode::OK,
-        Json(json!({"model_uid": model_uid, "status": "deleted"})),
+        Json(json!({"model_uid": model_uid, "status": "deleted", "gc_queued_nodes": queued_gc_nodes})),
     )
         .into_response()
 }

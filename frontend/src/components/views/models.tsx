@@ -68,8 +68,8 @@ export function ModelsView({
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-2xl font-bold text-foreground">Model Management</h2>
-                    <p className="text-sm text-muted-foreground mt-1">Load, monitor, and manage model deployments</p>
+                    <h2 className="text-2xl font-bold text-foreground">Model Service</h2>
+                    <p className="text-sm text-muted-foreground mt-1">Operate running model services and deployment lifecycle</p>
                 </div>
                 <Button
                     onClick={onOpenLoadDialog}
