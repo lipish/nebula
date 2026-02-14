@@ -544,8 +544,17 @@ pub async fn download_model_if_needed(
     model_dir: &str,
     replica_id: u32,
     hf_endpoint: Option<&str>,
-    _use_modelscope: bool,
+    use_modelscope: bool,
 ) -> anyhow::Result<String> {
+    let _ = use_modelscope; // reserved for future per-call override
+    // Unified cache check: look in both HF and ModelScope caches regardless of source.
+    if let Some(path) = find_hf_cached_model(model_name, model_dir)
+        .or_else(|| find_modelscope_cached_model(model_name, model_dir))
+    {
+        tracing::info!(%model_uid, %path, source=?model_source, "model already cached (unified check)");
+        return Ok(path);
+    }
+
     match model_source {
         ModelSource::Local => {
             // For local source, just verify the path exists
@@ -559,16 +568,56 @@ pub async fn download_model_if_needed(
             }
         }
         ModelSource::HuggingFace => {
-            download_hf_model(
+            // Try HuggingFace first, fallback to ModelScope on failure
+            match download_hf_model(
                 store, node_id, model_uid, model_name, model_dir, replica_id, hf_endpoint,
             )
             .await
+            {
+                Ok(path) => Ok(path),
+                Err(hf_err) => {
+                    tracing::warn!(
+                        %model_uid, error=%hf_err,
+                        "HuggingFace download failed, falling back to ModelScope"
+                    );
+                    download_modelscope_model(
+                        store, node_id, model_uid, model_name, model_dir, replica_id,
+                    )
+                    .await
+                    .map_err(|ms_err| {
+                        anyhow::anyhow!(
+                            "both download sources failed — HuggingFace: {}; ModelScope: {}",
+                            hf_err, ms_err
+                        )
+                    })
+                }
+            }
         }
         ModelSource::ModelScope => {
-            download_modelscope_model(
+            // Try ModelScope first, fallback to HuggingFace on failure
+            match download_modelscope_model(
                 store, node_id, model_uid, model_name, model_dir, replica_id,
             )
             .await
+            {
+                Ok(path) => Ok(path),
+                Err(ms_err) => {
+                    tracing::warn!(
+                        %model_uid, error=%ms_err,
+                        "ModelScope download failed, falling back to HuggingFace"
+                    );
+                    download_hf_model(
+                        store, node_id, model_uid, model_name, model_dir, replica_id, hf_endpoint,
+                    )
+                    .await
+                    .map_err(|hf_err| {
+                        anyhow::anyhow!(
+                            "both download sources failed — ModelScope: {}; HuggingFace: {}",
+                            ms_err, hf_err
+                        )
+                    })
+                }
+            }
         }
     }
 }
@@ -581,6 +630,13 @@ fn find_hf_cached_model(model_name: &str, model_dir: &str) -> Option<String> {
     let hf_path = base.join(".cache/huggingface/hub").join(&hf_dir_name);
     if hf_path.is_dir() && has_config_json_recursive(&hf_path) {
         return Some(hf_path.to_string_lossy().to_string());
+    }
+    // Check full org/name path: {model_dir}/{model_name} (e.g. /DATA/Model/Qwen/Qwen2.5-0.5B-Instruct)
+    if model_name.contains('/') {
+        let full_path = base.join(model_name);
+        if full_path.is_dir() && has_config_json_recursive(&full_path) {
+            return Some(full_path.to_string_lossy().to_string());
+        }
     }
     // Check direct path: {model_dir}/{model_name_last_part}/
     if let Some(short_name) = model_name.split('/').last() {
@@ -600,6 +656,13 @@ fn find_modelscope_cached_model(model_name: &str, model_dir: &str) -> Option<Str
     if ms_path.is_dir() && has_config_json_recursive(&ms_path) {
         return Some(ms_path.to_string_lossy().to_string());
     }
+    // Check full org/name path: {model_dir}/{model_name} (e.g. /DATA/Model/Qwen/Qwen2.5-0.5B-Instruct)
+    if model_name.contains('/') {
+        let full_path = base.join(model_name);
+        if full_path.is_dir() && has_config_json_recursive(&full_path) {
+            return Some(full_path.to_string_lossy().to_string());
+        }
+    }
     // Check direct path
     if let Some(short_name) = model_name.split('/').last() {
         let direct = base.join(short_name);
@@ -608,6 +671,15 @@ fn find_modelscope_cached_model(model_name: &str, model_dir: &str) -> Option<Str
         }
     }
     None
+}
+
+/// Build a PATH string that prepends `$HOME/.local/bin` to the current PATH.
+/// This ensures CLIs installed via `pip install --user` (e.g. huggingface-cli,
+/// modelscope) are discoverable even when the system PATH does not include it.
+fn augmented_path() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    format!("{}/.local/bin:{}", home, current)
 }
 
 /// Download a model from HuggingFace Hub.
@@ -686,6 +758,7 @@ async fn download_hf_model(
 
         let mut cmd = Command::new("huggingface-cli");
         cmd.args(["download", model_name]);
+        cmd.env("PATH", augmented_path());
         // Set HF cache dir
         cmd.env("HF_HOME", format!("{}/.cache/huggingface", model_dir));
         if let Some(endpoint) = hf_endpoint {
@@ -813,6 +886,7 @@ async fn download_modelscope_model(
 
         let mut cmd = Command::new("modelscope");
         cmd.args(["download", "--model", model_name]);
+        cmd.env("PATH", augmented_path());
         cmd.env(
             "MODELSCOPE_CACHE",
             format!("{}/.cache/modelscope", model_dir),
