@@ -205,3 +205,6 @@ application/node_modules
 /up_*.log
 /start_debug_*.sh
 *.local.sh
+
+# local deploy env
+deploy/nebula.env

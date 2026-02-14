@@ -317,3 +317,33 @@ docker compose --profile observe up -d --build
 - `XTRACE_DATABASE_URL`：xtrace 数据库连接串
 
 默认使用 `NEBULA_AUTH_TOKENS="devtoken:admin,viewtoken:viewer"`，可在 `docker-compose.yml` 中调整。
+
+## 10. 统一启动配置（nebula.env）
+
+推荐使用单一配置源 `deploy/nebula.env` 管理启动参数，避免脚本参数和手工命令漂移。
+
+```bash
+cp deploy/nebula.env.example deploy/nebula.env
+```
+
+至少设置以下字段：
+
+```bash
+START_BFF=1
+XTRACE_URL=http://127.0.0.1:8742
+XTRACE_AUTH_MODE=service
+XTRACE_TOKEN=<API_BEARER_TOKEN>
+```
+
+随后直接使用：
+
+```bash
+./bin/nebula-up.sh
+./bin/nebula-down.sh
+```
+
+可通过环境变量覆盖配置文件路径：
+
+```bash
+NEBULA_ENV_FILE=/path/to/nebula.env ./bin/nebula-up.sh
+```

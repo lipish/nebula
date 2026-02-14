@@ -1,15 +1,27 @@
 #!/bin/bash
 set -e
 
+# Paths (adjust these if running on a different machine)
+NEBULA_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+LOG_DIR="$NEBULA_ROOT/logs"
+ENV_FILE="${NEBULA_ENV_FILE:-$NEBULA_ROOT/deploy/nebula.env}"
+
+# Load centralized environment config when present.
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    . "$ENV_FILE"
+    set +a
+fi
+
 # Configuration
-ETCD_ENDPOINT="http://127.0.0.1:2379"
-GATEWAY_PORT=8081
-BFF_PORT=18090
-ROUTER_PORT=18081
-NODE_PORT=10824
-MODEL_UID="qwen2_5_0_5b"
-MODEL_NAME="Qwen/Qwen2.5-0.5B-Instruct"
-NODE_ID="node_gpu0"
+ETCD_ENDPOINT="${ETCD_ENDPOINT:-http://127.0.0.1:2379}"
+GATEWAY_PORT="${GATEWAY_PORT:-8081}"
+BFF_PORT="${BFF_PORT:-18090}"
+ROUTER_PORT="${ROUTER_PORT:-18081}"
+NODE_PORT="${NODE_PORT:-10824}"
+MODEL_UID="${MODEL_UID:-qwen2_5_0_5b}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-0.5B-Instruct}"
+NODE_ID="${NODE_ID:-node_gpu0}"
 
 # xtrace config for observability/audit APIs.
 # XTRACE_TOKEN is the bearer token used when Nebula calls xtrace.
@@ -22,14 +34,11 @@ XTRACE_AUTH_MODE="${XTRACE_AUTH_MODE:-internal}"
 # Example: START_BFF=1 XTRACE_TOKEN=nebula-xtrace-token-2026 ./bin/nebula-up.sh
 START_BFF="${START_BFF:-0}"
 
-# Paths (adjust these if running on a different machine)
-NEBULA_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-LOG_DIR="$NEBULA_ROOT/logs"
-
 mkdir -p "$LOG_DIR"
 
 echo "Starting Nebula Service Stack..."
 echo "Logs will be written to $LOG_DIR"
+echo "env file: $ENV_FILE"
 echo "xtrace url: $XTRACE_URL"
 echo "xtrace auth mode: $XTRACE_AUTH_MODE"
 if [ -z "$XTRACE_TOKEN" ]; then

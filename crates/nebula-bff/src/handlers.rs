@@ -536,16 +536,28 @@ async fn load_model_with_request(
 ///
 /// Auth behavior:
 /// - service: require and send `XTRACE_TOKEN`
-/// - internal: do not send auth header
-async fn xtrace_proxy_get(st: &AppState, path: &str, raw_query: Option<&str>) -> Response {
+/// - internal: try without auth; on 401, retry with service token or caller token
+async fn xtrace_proxy_get(
+    st: &AppState,
+    path: &str,
+    raw_query: Option<&str>,
+    caller_token: Option<&str>,
+) -> Response {
     let base = st.xtrace_url.trim_end_matches('/');
     let url = match raw_query {
         Some(q) if !q.is_empty() => format!("{path}?{q}", path = format!("{base}{path}"), q = q),
         _ => format!("{base}{path}"),
     };
 
-    let mut req = st.http.get(&url);
-    match st.xtrace_auth_mode {
+    let send = |token: Option<&str>| {
+        let mut req = st.http.get(&url);
+        if let Some(t) = token {
+            req = req.bearer_auth(t);
+        }
+        req
+    };
+
+    let resp = match st.xtrace_auth_mode {
         XtraceAuthMode::Service => {
             if st.xtrace_token.is_empty() {
                 return error_response(
@@ -554,19 +566,53 @@ async fn xtrace_proxy_get(st: &AppState, path: &str, raw_query: Option<&str>) ->
                     "XTRACE_AUTH_MODE=service requires XTRACE_TOKEN",
                 );
             }
-            req = req.bearer_auth(&st.xtrace_token);
+            match send(Some(&st.xtrace_token)).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    return error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "xtrace_error",
+                        &format!("xtrace request failed: {}", e),
+                    )
+                }
+            }
         }
-        XtraceAuthMode::Internal => {}
-    }
+        XtraceAuthMode::Internal => {
+            let first = match send(None).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    return error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "xtrace_error",
+                        &format!("xtrace request failed: {}", e),
+                    )
+                }
+            };
 
-    let resp = match req.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            return error_response(
-                StatusCode::BAD_GATEWAY,
-                "xtrace_error",
-                &format!("xtrace request failed: {}", e),
-            )
+            if first.status() == reqwest::StatusCode::UNAUTHORIZED {
+                let retry_token = if !st.xtrace_token.is_empty() {
+                    Some(st.xtrace_token.as_str())
+                } else {
+                    caller_token.filter(|t| !t.is_empty())
+                };
+
+                if let Some(token) = retry_token {
+                    match send(Some(token)).send().await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            return error_response(
+                                StatusCode::BAD_GATEWAY,
+                                "xtrace_error",
+                                &format!("xtrace request failed: {}", e),
+                            )
+                        }
+                    }
+                } else {
+                    first
+                }
+            } else {
+                first
+            }
         }
     };
 
@@ -593,7 +639,7 @@ pub async fn observe_traces(
     if let Some(resp) = require_role(&ctx, Role::Viewer) {
         return resp;
     }
-    xtrace_proxy_get(&st, "/api/public/traces", req.uri().query()).await
+    xtrace_proxy_get(&st, "/api/public/traces", req.uri().query(), Some(&ctx.principal)).await
 }
 
 pub async fn observe_trace_detail(
@@ -604,7 +650,13 @@ pub async fn observe_trace_detail(
     if let Some(resp) = require_role(&ctx, Role::Viewer) {
         return resp;
     }
-    xtrace_proxy_get(&st, &format!("/api/public/traces/{trace_id}"), None).await
+    xtrace_proxy_get(
+        &st,
+        &format!("/api/public/traces/{trace_id}"),
+        None,
+        Some(&ctx.principal),
+    )
+    .await
 }
 
 pub async fn observe_metrics_query(
@@ -615,7 +667,13 @@ pub async fn observe_metrics_query(
     if let Some(resp) = require_role(&ctx, Role::Viewer) {
         return resp;
     }
-    xtrace_proxy_get(&st, "/api/public/metrics/query", req.uri().query()).await
+    xtrace_proxy_get(
+        &st,
+        "/api/public/metrics/query",
+        req.uri().query(),
+        Some(&ctx.principal),
+    )
+    .await
 }
 
 pub async fn observe_metrics_names(
@@ -626,7 +684,13 @@ pub async fn observe_metrics_names(
     if let Some(resp) = require_role(&ctx, Role::Viewer) {
         return resp;
     }
-    xtrace_proxy_get(&st, "/api/public/metrics/names", req.uri().query()).await
+    xtrace_proxy_get(
+        &st,
+        "/api/public/metrics/names",
+        req.uri().query(),
+        Some(&ctx.principal),
+    )
+    .await
 }
 
 async fn unload_model_inner(st: AppState, id: String) -> Response {
@@ -706,7 +770,7 @@ pub async fn audit_logs(
     } else {
         format!("{existing_query}&tags%5B%5D=audit")
     };
-    xtrace_proxy_get(&st, "/api/public/traces", Some(&query)).await
+    xtrace_proxy_get(&st, "/api/public/traces", Some(&query), Some(&ctx.principal)).await
 }
 
 // ---------------------------------------------------------------------------
