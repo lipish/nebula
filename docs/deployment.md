@@ -347,3 +347,5 @@ XTRACE_TOKEN=<API_BEARER_TOKEN>
 ```bash
 NEBULA_ENV_FILE=/path/to/nebula.env ./bin/nebula-up.sh
 ```
+
+远端实操 SOP（登录、rsync 部署、重启、测试）见：`docs/memory/remote_login_deploy_test.md`。
