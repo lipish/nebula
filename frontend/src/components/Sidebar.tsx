@@ -4,6 +4,7 @@ import {
     ChevronRight, ChevronDown, Diamond, Activity, Cpu, Shield, Container, Layers, BookOpen
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 interface SidebarProps {
     page: string;
@@ -11,32 +12,32 @@ interface SidebarProps {
     clusterHealthy: boolean;
 }
 
-const menuItems = [
-    { id: 'dashboard', icon: LayoutDashboard, label: "Dashboard" },
-    { id: 'models', icon: Box, label: "Model Service" },
-    { id: 'inference', icon: Activity, label: "Inference" },
-    { id: 'endpoints', icon: Cpu, label: "Endpoints" },
-];
-
-const infrastructureItems = [
-    { id: 'nodes', icon: Server, label: "Nodes & GPUs" },
-    { id: 'images', icon: Container, label: "Images" },
-    { id: 'templates', icon: Layers, label: "Templates" },
-];
-
-const resourceItems = [
-    { id: 'model-catalog', icon: BookOpen, label: "Model Catalog" },
-    { id: 'model-library', icon: Layers, label: "Model Library" },
-    { id: 'audit', icon: Shield, label: "Audit Logs" },
-];
-
-const systemItems = [
-    { id: 'settings', icon: Settings, label: "Settings" },
-    { icon: HelpCircle, label: "Help" },
-    { icon: MessageSquare, label: "Feedback" },
-];
-
 const Sidebar = ({ page, setPage }: SidebarProps) => {
+    const { t } = useI18n();
+    const menuItems = [
+        { id: 'dashboard', icon: LayoutDashboard, label: t('nav.dashboard') },
+        { id: 'models', icon: Box, label: t('nav.models') },
+        { id: 'inference', icon: Activity, label: t('nav.inference') },
+        { id: 'endpoints', icon: Cpu, label: t('nav.endpoints') },
+    ];
+
+    const infrastructureItems = [
+        { id: 'nodes', icon: Server, label: t('nav.nodes') },
+        { id: 'images', icon: Container, label: t('nav.images') },
+        { id: 'templates', icon: Layers, label: t('nav.templates') },
+    ];
+
+    const resourceItems = [
+        { id: 'model-catalog', icon: BookOpen, label: t('nav.catalog') },
+        { id: 'model-library', icon: Layers, label: t('nav.library') },
+        { id: 'audit', icon: Shield, label: t('nav.audit') },
+    ];
+
+    const systemItems = [
+        { id: 'settings', icon: Settings, label: t('nav.settings') },
+        { icon: HelpCircle, label: t('nav.help') },
+        { icon: MessageSquare, label: t('nav.feedback') },
+    ];
     const infrastructureIds = useMemo(() => infrastructureItems.map((item) => item.id), []);
     const resourceIds = useMemo(() => resourceItems.map((item) => item.id), []);
     const systemIds = useMemo(() => systemItems.map((item) => item.id).filter(Boolean) as string[], []);
@@ -67,7 +68,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
 
             <nav className="flex-1 px-3 py-3 overflow-y-auto">
                 <div className="flex items-center justify-between px-3 mb-1">
-                    <p className="text-xs font-medium text-muted-foreground">Workbench</p>
+                    <p className="text-xs font-medium text-muted-foreground">{t('nav.workbench')}</p>
                     <button onClick={() => setMenuOpen(!menuOpen)} className="text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors">
                         {menuOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                     </button>
@@ -93,7 +94,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                 )}
 
                 <div className="flex items-center justify-between px-3 mt-5 mb-1">
-                    <p className="text-xs font-medium text-muted-foreground">Infrastructure</p>
+                    <p className="text-xs font-medium text-muted-foreground">{t('nav.infrastructure')}</p>
                     <button onClick={() => setInfraOpen(!infraOpen)} className="text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors">
                         {infraOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                     </button>
@@ -119,7 +120,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                 )}
 
                 <div className="flex items-center justify-between px-3 mt-5 mb-1">
-                    <p className="text-xs font-medium text-muted-foreground">Resources</p>
+                    <p className="text-xs font-medium text-muted-foreground">{t('nav.resources')}</p>
                     <button onClick={() => setResourcesOpen(!resourcesOpen)} className="text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors">
                         {resourcesOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                     </button>
@@ -145,7 +146,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                 )}
 
                 <div className="flex items-center justify-between px-3 mt-5 mb-1">
-                    <p className="text-xs font-medium text-muted-foreground">System</p>
+                    <p className="text-xs font-medium text-muted-foreground">{t('nav.system')}</p>
                     <button onClick={() => setSystemOpen(!systemOpen)} className="text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors">
                         {systemOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                     </button>

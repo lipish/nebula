@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useI18n } from "@/lib/i18n"
 
 interface AuditTrace {
   id: string
@@ -58,6 +59,7 @@ const fmtTs = (iso: string) => {
 }
 
 export function AuditView({ token }: AuditViewProps) {
+  const { t } = useI18n()
   const [data, setData] = useState<AuditTrace[]>([])
   const [meta, setMeta] = useState<AuditPageMeta>({ page: 1, limit: 50, totalItems: 0, totalPages: 0 })
   const [loading, setLoading] = useState(false)
@@ -82,11 +84,11 @@ export function AuditView({ token }: AuditViewProps) {
       setData(json.data ?? [])
       setMeta(json.meta ?? { page: 1, limit: 50, totalItems: 0, totalPages: 0 })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load audit logs")
+      setError(err instanceof Error ? err.message : t('audit.failedLoad'))
     } finally {
       setLoading(false)
     }
-  }, [token, filterUser])
+  }, [token, filterUser, t])
 
   useEffect(() => { fetchAudit(page) }, [fetchAudit, page])
 
@@ -121,10 +123,8 @@ export function AuditView({ token }: AuditViewProps) {
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Audit Logs</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Track who did what and when across the platform
-          </p>
+          <h2 className="text-2xl font-bold text-foreground">{t('audit.title')}</h2>
+          <p className="text-sm text-muted-foreground mt-1">{t('audit.subtitle')}</p>
         </div>
         <Button
           variant="outline"
@@ -134,7 +134,7 @@ export function AuditView({ token }: AuditViewProps) {
           className="gap-2"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Refresh
+          {t('common.refresh')}
         </Button>
       </div>
 
@@ -143,7 +143,7 @@ export function AuditView({ token }: AuditViewProps) {
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Filter by principal..."
+            placeholder={t('audit.filterByPrincipal')}
             className="pl-9 h-9"
             value={filterUser}
             onChange={(e) => setFilterUser(e.target.value)}
@@ -151,7 +151,7 @@ export function AuditView({ token }: AuditViewProps) {
           />
         </div>
         <Badge variant="secondary" className="text-xs">
-          {meta.totalItems} total
+          {meta.totalItems} {t('common.total')}
         </Badge>
       </div>
 
@@ -166,12 +166,12 @@ export function AuditView({ token }: AuditViewProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[180px] px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Time</TableHead>
-              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Principal</TableHead>
-              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Role</TableHead>
-              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Action</TableHead>
-              <TableHead className="w-[80px] px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Status</TableHead>
-              <TableHead className="w-[90px] text-right px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">Latency</TableHead>
+              <TableHead className="w-[180px] px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('audit.time')}</TableHead>
+              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('audit.principal')}</TableHead>
+              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('audit.role')}</TableHead>
+              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('audit.action')}</TableHead>
+              <TableHead className="w-[80px] px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('common.status')}</TableHead>
+              <TableHead className="w-[90px] text-right px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('audit.latency')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -179,7 +179,7 @@ export function AuditView({ token }: AuditViewProps) {
               <TableRow>
                 <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
                   <Shield className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                  No audit logs found
+                  {t('audit.noData')}
                 </TableCell>
               </TableRow>
             )}
@@ -222,7 +222,7 @@ export function AuditView({ token }: AuditViewProps) {
       {meta.totalPages > 1 && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
-            Page {meta.page} of {meta.totalPages}
+            {t('audit.page', { page: meta.page, total: meta.totalPages })}
           </p>
           <div className="flex gap-2">
             <Button

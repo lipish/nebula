@@ -10,6 +10,7 @@ import {
 } from "recharts"
 import { apiGet, v2 } from "@/lib/api"
 import type { ClusterStatus, DiskAlert, EndpointStats } from "@/lib/types"
+import { useI18n } from "@/lib/i18n"
 
 interface DashboardProps {
     overview: ClusterStatus
@@ -31,6 +32,7 @@ interface MetricQueryResult {
 }
 
 export function DashboardView({ overview, counts, gpuStats, pct, engineStats, token }: DashboardProps) {
+    const { t } = useI18n()
     const gpuUsagePct = gpuStats.count > 0 ? pct(gpuStats.used, gpuStats.total) : 0
 
     // Disk alerts from v2
@@ -185,8 +187,8 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
         <div className="space-y-5">
             {/* Header */}
             <div>
-                <h2 className="text-2xl font-bold text-foreground">Overview</h2>
-                <p className="text-sm text-muted-foreground mt-1">Here's an overview of your cluster health and active models</p>
+                <h2 className="text-2xl font-bold text-foreground">{t('dashboard.title')}</h2>
+                <p className="text-sm text-muted-foreground mt-1">{t('dashboard.subtitle')}</p>
             </div>
 
             {/* Disk alert banners */}
@@ -204,7 +206,7 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
                                 <span className="font-medium">{alert.node_id}:</span>
                                 <span>{alert.message}</span>
                                 <Badge variant={isCritical ? "destructive" : "warning"} className="ml-auto text-[10px]">
-                                    {isCritical ? "critical" : "warning"}
+                                    {isCritical ? t('dashboard.critical') : t('dashboard.warning')}
                                 </Badge>
                             </div>
                         )
@@ -217,13 +219,13 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
                 {/* GPU Memory */}
                 <div className="bg-card border border-border rounded-2xl p-5">
                     <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm text-muted-foreground">GPU Memory</span>
+                        <span className="text-sm text-muted-foreground">{t('dashboard.gpuMemory')}</span>
                         <Monitor className="h-4 w-4 text-muted-foreground" />
                     </div>
                     <div className="flex items-center gap-2">
                         <span className="text-2xl font-bold text-foreground">{gpuUsagePct}%</span>
                         <Badge className="bg-success/10 text-success border-0 text-xs font-medium hover:bg-success/10">
-                            {gpuUsagePct > 80 ? "High" : "Healthy"}
+                            {gpuUsagePct > 80 ? t('dashboard.high') : t('dashboard.healthy')}
                         </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">{Math.round(gpuStats.used / 1024)} / {Math.round(gpuStats.total / 1024)} GB</p>
@@ -232,36 +234,36 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
                 {/* GPU Utilization */}
                 <div className="bg-card border border-border rounded-2xl p-5">
                     <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm text-muted-foreground">Avg Utilization</span>
+                        <span className="text-sm text-muted-foreground">{t('dashboard.avgUtilization')}</span>
                         <Cpu className="h-4 w-4 text-muted-foreground" />
                     </div>
                     <span className="text-2xl font-bold text-foreground">{gpuSummary.avgUtil}%</span>
-                    <p className="text-xs text-muted-foreground mt-1">{gpuStats.count} GPUs across {counts.nodes} nodes</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t('dashboard.gpusAcrossNodes', { gpus: gpuStats.count, nodes: counts.nodes })}</p>
                 </div>
 
                 {/* Temperature */}
                 <div className="bg-card border border-border rounded-2xl p-5">
                     <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm text-muted-foreground">Max Temperature</span>
+                        <span className="text-sm text-muted-foreground">{t('dashboard.maxTemperature')}</span>
                         <Thermometer className="h-4 w-4 text-muted-foreground" />
                     </div>
                     <div className="flex items-center gap-2">
                         <span className="text-2xl font-bold text-foreground">{gpuSummary.maxTemp > 0 ? `${gpuSummary.maxTemp}°C` : "—"}</span>
                         {gpuSummary.maxTemp > 80 && (
-                            <Badge className="bg-destructive/10 text-destructive border-0 text-xs font-medium hover:bg-destructive/10">Hot</Badge>
+                            <Badge className="bg-destructive/10 text-destructive border-0 text-xs font-medium hover:bg-destructive/10">{t('dashboard.hot')}</Badge>
                         )}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">{counts.endpoints} active endpoints</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t('dashboard.activeEndpointsCount', { count: counts.endpoints })}</p>
                 </div>
 
                 {/* Endpoints */}
                 <div className="bg-card border border-border rounded-2xl p-5">
                     <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm text-muted-foreground">Active Endpoints</span>
+                        <span className="text-sm text-muted-foreground">{t('dashboard.activeEndpoints')}</span>
                         <Activity className="h-4 w-4 text-muted-foreground" />
                     </div>
                     <span className="text-2xl font-bold text-foreground">{counts.endpoints}</span>
-                    <p className="text-xs text-muted-foreground mt-1">{overview.model_requests.length} model requests</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t('dashboard.modelRequestsCount', { count: overview.model_requests.length })}</p>
                 </div>
             </div>
 
@@ -270,11 +272,11 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
                 {/* GPU Memory Usage — Bar Chart */}
                 <div className="bg-card border border-border rounded-2xl p-6">
                     <div className="flex items-center justify-between mb-5">
-                        <h3 className="text-base font-bold text-foreground">GPU Memory Usage</h3>
-                        <span className="text-sm text-muted-foreground">{Math.round(gpuStats.total / 1024)} GB total</span>
+                        <h3 className="text-base font-bold text-foreground">{t('dashboard.gpuMemoryUsage')}</h3>
+                        <span className="text-sm text-muted-foreground">{Math.round(gpuStats.total / 1024)} GB {t('dashboard.total')}</span>
                     </div>
                     {gpuBarData.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-12 text-center">No GPU data available.</p>
+                        <p className="text-sm text-muted-foreground py-12 text-center">{t('dashboard.noGpuData')}</p>
                     ) : (
                         <div className="h-56">
                             <ResponsiveContainer width="100%" height="100%">
@@ -286,8 +288,8 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
                                         contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
                                         formatter={(value) => `${Number(value).toLocaleString()} MB`}
                                     />
-                                    <Bar dataKey="memUsed" stackId="a" fill="hsl(var(--chart-1))" name="Used" barSize={36} />
-                                    <Bar dataKey="memFree" stackId="a" fill="hsl(var(--chart-2))" name="Free" barSize={36} radius={[4, 4, 0, 0]} />
+                                    <Bar dataKey="memUsed" stackId="a" fill="hsl(var(--chart-1))" name={t('dashboard.used')} barSize={36} />
+                                    <Bar dataKey="memFree" stackId="a" fill="hsl(var(--chart-2))" name={t('dashboard.free')} barSize={36} radius={[4, 4, 0, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -297,11 +299,11 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
                 {/* GPU Trend — Line Chart (from xtrace) */}
                 <div className="bg-card border border-border rounded-2xl p-6">
                     <div className="flex items-center justify-between mb-5">
-                        <h3 className="text-base font-bold text-foreground">GPU Trend (1h)</h3>
-                        <span className="text-xs text-muted-foreground">from xtrace metrics</span>
+                        <h3 className="text-base font-bold text-foreground">{t('dashboard.gpuTrend')}</h3>
+                        <span className="text-xs text-muted-foreground">{t('dashboard.fromXtrace')}</span>
                     </div>
                     {gpuTrend.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-12 text-center">No trend data yet. Metrics will appear after xtrace collects data.</p>
+                        <p className="text-sm text-muted-foreground py-12 text-center">{t('dashboard.noTrendData')}</p>
                     ) : (
                         <div className="h-56">
                             <ResponsiveContainer width="100%" height="100%">
@@ -311,8 +313,8 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
                                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} domain={[0, 100]} unit="%" />
                                     <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
                                     <Legend />
-                                    <Line type="monotone" dataKey="utilization" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} name="Utilization %" />
-                                    <Line type="monotone" dataKey="temperature" stroke="hsl(var(--chart-3, 0 80% 60%))" strokeWidth={2} dot={false} name="Temp °C" />
+                                    <Line type="monotone" dataKey="utilization" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} name={t('dashboard.utilizationPct')} />
+                                    <Line type="monotone" dataKey="temperature" stroke="hsl(var(--chart-3, 0 80% 60%))" strokeWidth={2} dot={false} name={t('dashboard.tempC')} />
                                 </LineChart>
                             </ResponsiveContainer>
                         </div>
@@ -323,12 +325,12 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
             {/* Endpoint Table — Enhanced */}
             <div className="bg-card border border-border rounded-2xl p-6">
                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-base font-bold text-foreground">Active Endpoints</h3>
+                    <h3 className="text-base font-bold text-foreground">{t('dashboard.activeEndpoints')}</h3>
                     <div className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 max-w-[200px]">
                         <Search className="h-4 w-4 text-muted-foreground" />
                         <input
                             type="text"
-                            placeholder="Search..."
+                            placeholder={t('common.search')}
                             className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
                         />
                     </div>
@@ -337,20 +339,20 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
                 <Table>
                     <TableHeader>
                         <TableRow className="hover:bg-transparent">
-                            <TableHead className="font-medium">Model</TableHead>
-                            <TableHead className="font-medium">Node</TableHead>
+                            <TableHead className="font-medium">{t('models.model')}</TableHead>
+                            <TableHead className="font-medium">{t('endpoints.nodeGpu')}</TableHead>
                             <TableHead className="font-medium">GPU</TableHead>
-                            <TableHead className="font-medium">VRAM</TableHead>
-                            <TableHead className="font-medium">KV Cache</TableHead>
-                            <TableHead className="font-medium">Pending</TableHead>
-                            <TableHead className="font-medium">Status</TableHead>
+                            <TableHead className="font-medium">{t('endpoints.vram')}</TableHead>
+                            <TableHead className="font-medium">{t('endpoints.kvCache')}</TableHead>
+                            <TableHead className="font-medium">{t('endpoints.pending')}</TableHead>
+                            <TableHead className="font-medium">{t('common.status')}</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {endpointRows.length === 0 ? (
                             <TableRow>
                                 <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                                    No endpoints online. Load a model to get started.
+                                    {t('dashboard.noEndpointsOnline')}
                                 </TableCell>
                             </TableRow>
                         ) : (

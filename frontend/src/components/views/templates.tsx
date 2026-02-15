@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { v2 } from "@/lib/api"
 import type { ModelTemplate } from "@/lib/types"
+import { useI18n } from "@/lib/i18n"
 
 interface TemplatesViewProps {
   token: string
@@ -21,6 +22,7 @@ const EMPTY_DEPLOY_FORM = {
 }
 
 export function TemplatesView({ token }: TemplatesViewProps) {
+  const { t } = useI18n()
   const [templates, setTemplates] = useState<ModelTemplate[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -35,7 +37,7 @@ export function TemplatesView({ token }: TemplatesViewProps) {
       const data = await v2.listTemplates(token)
       setTemplates(data)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load templates")
+      setError(err instanceof Error ? err.message : t('templates.failedLoad'))
     } finally {
       setLoading(false)
     }
@@ -74,7 +76,7 @@ export function TemplatesView({ token }: TemplatesViewProps) {
       setDeployDialogOpen(false)
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to deploy template")
+      setError(err instanceof Error ? err.message : t('templates.deployFailed'))
     }
   }
 
@@ -82,9 +84,9 @@ export function TemplatesView({ token }: TemplatesViewProps) {
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Model Templates</h2>
+          <h2 className="text-2xl font-bold text-foreground">{t('templates.title')}</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Pre-configured model templates for quick deployment
+            {t('templates.subtitle')}
           </p>
         </div>
         <div className="flex gap-2">
@@ -96,7 +98,7 @@ export function TemplatesView({ token }: TemplatesViewProps) {
             className="rounded-xl"
           >
             <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />
-            Refresh
+            {t('common.refresh')}
           </Button>
         </div>
       </div>
@@ -112,14 +114,14 @@ export function TemplatesView({ token }: TemplatesViewProps) {
         <div className="px-6 py-5 border-b border-border bg-accent/30 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-foreground tracking-tight">
-              Available Templates
+              {t('templates.available')}
             </h3>
           </div>
           <Badge
             variant="outline"
             className="font-bold border-primary/20 text-primary uppercase h-6"
           >
-            {templates.length} Total
+            {templates.length} {t('common.total')}
           </Badge>
         </div>
 
@@ -127,25 +129,25 @@ export function TemplatesView({ token }: TemplatesViewProps) {
           <TableHeader>
             <TableRow className="bg-muted hover:bg-muted border-b border-border">
               <TableHead className="text-[11px] font-bold text-muted-foreground uppercase pl-6 pr-4 py-4">
-                Name
+                {t('templates.name')}
               </TableHead>
               <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
-                Model
+                {t('models.model')}
               </TableHead>
               <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
-                Engine
+                {t('models.engine')}
               </TableHead>
               <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
-                Category
+                {t('templates.category')}
               </TableHead>
               <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
-                Source
+                {t('catalog.source')}
               </TableHead>
               <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
-                Replicas
+                {t('models.replicas')}
               </TableHead>
               <TableHead className="text-right text-[11px] font-bold text-muted-foreground uppercase pl-4 pr-6 py-4">
-                Actions
+                {t('common.actions')}
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -156,7 +158,7 @@ export function TemplatesView({ token }: TemplatesViewProps) {
                   <div className="flex flex-col items-center justify-center opacity-40">
                     <Layers className="h-12 w-12 mb-2" />
                     <p className="text-sm font-bold text-muted-foreground">
-                      No templates available yet.
+                      {t('templates.noData')}
                     </p>
                   </div>
                 </TableCell>
@@ -216,7 +218,7 @@ export function TemplatesView({ token }: TemplatesViewProps) {
                       className="text-xs font-bold rounded-xl h-8"
                     >
                       <Rocket className="h-3.5 w-3.5 mr-1" />
-                      Deploy
+                      {t('templates.deploy')}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -231,19 +233,19 @@ export function TemplatesView({ token }: TemplatesViewProps) {
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
             <DialogTitle>
-              Deploy Template: {selectedTemplate?.name}
+              {t('templates.deployTemplateTitle', { name: selectedTemplate?.name ?? '' })}
             </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label htmlFor="deploy-uid">
-                Model UID{" "}
-                <span className="text-muted-foreground font-normal">(optional override)</span>
+                {t('templates.modelUid')} {" "}
+                <span className="text-muted-foreground font-normal">({t('templates.optionalOverride')})</span>
               </Label>
               <Input
                 id="deploy-uid"
-                placeholder="Leave empty to auto-generate"
+                placeholder={t('templates.leaveEmptyAuto')}
                 value={deployForm.model_uid}
                 onChange={(e) => setDeployForm({ ...deployForm, model_uid: e.target.value })}
               />
@@ -251,7 +253,7 @@ export function TemplatesView({ token }: TemplatesViewProps) {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="deploy-replicas">Replicas</Label>
+                <Label htmlFor="deploy-replicas">{t('models.replicas')}</Label>
                 <Input
                   id="deploy-replicas"
                   type="number"
@@ -262,10 +264,10 @@ export function TemplatesView({ token }: TemplatesViewProps) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="deploy-node">Node ID</Label>
+                <Label htmlFor="deploy-node">{t('templates.nodeId')}</Label>
                 <Input
                   id="deploy-node"
-                  placeholder="Optional"
+                  placeholder={t('templates.optional')}
                   value={deployForm.node_id}
                   onChange={(e) => setDeployForm({ ...deployForm, node_id: e.target.value })}
                 />
@@ -274,12 +276,12 @@ export function TemplatesView({ token }: TemplatesViewProps) {
 
             <div className="space-y-2">
               <Label htmlFor="deploy-gpus">
-                GPU Indices{" "}
-                <span className="text-muted-foreground font-normal">(comma-separated)</span>
+                {t('templates.gpuIndices')} {" "}
+                <span className="text-muted-foreground font-normal">({t('templates.commaSeparated')})</span>
               </Label>
               <Input
                 id="deploy-gpus"
-                placeholder="e.g. 0, 1"
+                placeholder={t('templates.gpuExample')}
                 value={deployForm.gpu_indices}
                 onChange={(e) => setDeployForm({ ...deployForm, gpu_indices: e.target.value })}
               />
@@ -292,14 +294,14 @@ export function TemplatesView({ token }: TemplatesViewProps) {
               onClick={() => setDeployDialogOpen(false)}
               className="rounded-xl"
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               onClick={handleDeploy}
               className="rounded-xl"
             >
               <Rocket className="h-4 w-4 mr-2" />
-              Deploy
+              {t('templates.deploy')}
             </Button>
           </DialogFooter>
         </DialogContent>

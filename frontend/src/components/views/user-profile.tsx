@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { authApi } from '@/lib/api'
 import type { AuthUser } from '@/lib/types'
+import { useI18n } from '@/lib/i18n'
 
 interface UserProfileViewProps {
   token: string
@@ -14,6 +15,7 @@ interface UserProfileViewProps {
 }
 
 export function UserProfileView({ token, user, onProfileUpdated }: UserProfileViewProps) {
+  const { t } = useI18n()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [saved, setSaved] = useState(false)
@@ -40,7 +42,7 @@ export function UserProfileView({ token, user, onProfileUpdated }: UserProfileVi
       setSaved(true)
       setTimeout(() => setSaved(false), 1200)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save profile')
+      setError(err instanceof Error ? err.message : t('profile.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -49,8 +51,8 @@ export function UserProfileView({ token, user, onProfileUpdated }: UserProfileVi
   return (
     <div className="max-w-2xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div>
-        <h2 className="text-2xl font-bold text-foreground">Edit Profile</h2>
-        <p className="text-sm text-muted-foreground mt-1">Update your basic profile information.</p>
+        <h2 className="text-2xl font-bold text-foreground">{t('profile.title')}</h2>
+        <p className="text-sm text-muted-foreground mt-1">{t('profile.subtitle')}</p>
       </div>
 
       <div className="bg-card border border-border rounded-2xl p-6 space-y-5">
@@ -59,27 +61,27 @@ export function UserProfileView({ token, user, onProfileUpdated }: UserProfileVi
             <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
               <UserRound className="h-4.5 w-4.5" />
             </div>
-            <p className="font-semibold text-foreground">Profile Details</p>
+            <p className="font-semibold text-foreground">{t('profile.details')}</p>
           </div>
           <Badge variant="outline" className="text-[10px] uppercase">PostgreSQL</Badge>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="profile-name">Display Name</Label>
-          <Input id="profile-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
+          <Label htmlFor="profile-name">{t('profile.displayName')}</Label>
+          <Input id="profile-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('profile.namePlaceholder')} />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="profile-email">Email</Label>
-          <Input id="profile-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" />
+          <Label htmlFor="profile-email">{t('profile.email')}</Label>
+          <Input id="profile-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t('profile.emailPlaceholder')} />
         </div>
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         <div className="flex items-center justify-between pt-2">
-          <p className="text-xs text-muted-foreground">Profile data is persisted in backend PostgreSQL.</p>
+          <p className="text-xs text-muted-foreground">{t('profile.persistHint')}</p>
           <Button onClick={onSave} className="rounded-xl" disabled={saving}>
-            {saving ? 'Saving...' : saved ? 'Saved' : 'Save Changes'}
+            {saving ? t('profile.saving') : saved ? t('profile.saved') : t('profile.saveChanges')}
           </Button>
         </div>
       </div>

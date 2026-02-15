@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { apiGet } from '@/lib/api'
 import { v2 } from '@/lib/api'
 import type { ModelView } from '@/lib/types'
+import { useI18n } from '@/lib/i18n'
 
 interface ModelLibraryViewProps {
   token: string
@@ -25,6 +26,7 @@ interface CacheSummary {
 }
 
 export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps) {
+  const { t } = useI18n()
   const [models, setModels] = useState<ModelView[]>([])
   const [cacheSummary, setCacheSummary] = useState<CacheSummary | null>(null)
   const [loading, setLoading] = useState(true)
@@ -114,12 +116,12 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Model Library</h2>
-          <p className="text-sm text-muted-foreground mt-1">Manage downloaded model assets and storage path</p>
+          <h2 className="text-2xl font-bold text-foreground">{t('library.title')}</h2>
+          <p className="text-sm text-muted-foreground mt-1">{t('library.subtitle')}</p>
         </div>
         <Button variant="outline" size="sm" onClick={refresh} disabled={loading} className="rounded-xl">
           <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
+          {t('common.refresh')}
         </Button>
       </div>
 
@@ -132,21 +134,21 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
       <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
         <div className="px-6 py-5 border-b border-border bg-accent/30 flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-bold text-foreground tracking-tight">Downloaded Assets</h3>
+            <h3 className="text-lg font-bold text-foreground tracking-tight">{t('library.assets')}</h3>
           </div>
           <Badge variant="outline" className="font-bold border-primary/20 text-primary uppercase h-6">
-            {models.length} Models
+            {models.length} {t('library.models')}
           </Badge>
         </div>
 
         <Table>
           <TableHeader>
             <TableRow className="bg-muted hover:bg-muted border-b border-border">
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">Model</TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">Asset Status</TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">Service Status</TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">Replicas</TableHead>
-              <TableHead className="text-right text-[11px] font-bold text-muted-foreground uppercase py-4">Actions</TableHead>
+              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('models.model')}</TableHead>
+              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('library.assetStatus')}</TableHead>
+              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('library.serviceStatus')}</TableHead>
+              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('models.replicas')}</TableHead>
+              <TableHead className="text-right text-[11px] font-bold text-muted-foreground uppercase py-4">{t('common.actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -154,13 +156,13 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
               <TableRow>
                 <TableCell colSpan={5} className="h-40 text-center">
                   <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">Loading model library…</p>
+                  <p className="text-sm text-muted-foreground">{t('library.loading')}</p>
                 </TableCell>
               </TableRow>
             ) : models.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="h-40 text-center text-sm text-muted-foreground">
-                  No downloaded models found.
+                  {t('library.empty')}
                 </TableCell>
               </TableRow>
             ) : (
@@ -175,12 +177,12 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
                     </TableCell>
                     <TableCell>
                       {cache.bytes > 0 ? (
-                        <Badge variant="secondary" className="text-[11px] font-bold uppercase">Downloaded</Badge>
+                        <Badge variant="secondary" className="text-[11px] font-bold uppercase">{t('catalog.downloaded')}</Badge>
                       ) : (
-                        <Badge variant="outline" className="text-[11px] font-bold uppercase">Pending</Badge>
+                        <Badge variant="outline" className="text-[11px] font-bold uppercase">{t('library.pending')}</Badge>
                       )}
                       <div className="text-[10px] text-muted-foreground mt-1">
-                        {cache.nodes} node(s) cached
+                        {t('library.cachedNodes', { count: cache.nodes })}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -192,7 +194,7 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
                     <TableCell className="text-right">
                       <div className="inline-flex items-center gap-2">
                         <Button size="sm" variant="outline" className="rounded-xl h-8" onClick={() => onOpenService(model.model_uid)}>
-                          Open Service
+                          {t('library.openService')}
                         </Button>
                         <Button
                           size="sm"
@@ -201,7 +203,7 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
                           onClick={() => openMoveDialog(model)}
                           disabled={acting}
                         >
-                          <FolderInput className="h-3.5 w-3.5 mr-1" /> Move
+                          <FolderInput className="h-3.5 w-3.5 mr-1" /> {t('library.move')}
                         </Button>
                         <Button
                           size="sm"
@@ -210,7 +212,7 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
                           onClick={() => handleDelete(model.model_uid)}
                           disabled={acting}
                         >
-                          <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                          <Trash2 className="h-3.5 w-3.5 mr-1" /> {t('common.delete')}
                         </Button>
                       </div>
                     </TableCell>
@@ -225,26 +227,26 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
       <Dialog open={moveDialogOpen} onOpenChange={setMoveDialogOpen}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Move Model Storage Path</DialogTitle>
+            <DialogTitle>{t('library.moveStoragePath')}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-3 py-2">
-            <p className="text-sm text-muted-foreground break-all">Model: {selectedModel?.model_uid || '—'}</p>
+            <p className="text-sm text-muted-foreground break-all">{t('models.model')}: {selectedModel?.model_uid || '—'}</p>
             <div className="space-y-2">
-              <Label htmlFor="library-move-path">New Path</Label>
+              <Label htmlFor="library-move-path">{t('library.newPath')}</Label>
               <Input
                 id="library-move-path"
-                placeholder="e.g. /DATA/Model or /mnt/models"
+                placeholder={t('library.newPathPlaceholder')}
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
               />
-              <p className="text-xs text-muted-foreground">This updates model download/storage path configuration for subsequent operations.</p>
+              <p className="text-xs text-muted-foreground">{t('library.movePathHint')}</p>
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setMoveDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleMove} disabled={!newPath.trim() || !selectedModel}>Save</Button>
+            <Button variant="outline" onClick={() => setMoveDialogOpen(false)}>{t('common.cancel')}</Button>
+            <Button onClick={handleMove} disabled={!newPath.trim() || !selectedModel}>{t('common.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

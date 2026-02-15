@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { apiGet, apiPut, apiDelete } from "@/lib/api"
 import type { EngineImage, NodeImageStatus } from "@/lib/types"
+import { useI18n } from "@/lib/i18n"
 
 interface ImagesViewProps {
   token: string
@@ -37,6 +38,7 @@ const EMPTY_FORM: Omit<EngineImage, "created_at_ms" | "updated_at_ms"> = {
 }
 
 export function ImagesView({ token }: ImagesViewProps) {
+  const { t } = useI18n()
   const [images, setImages] = useState<EngineImage[]>([])
   const [statuses, setStatuses] = useState<NodeImageStatus[]>([])
   const [loading, setLoading] = useState(false)
@@ -58,7 +60,7 @@ export function ImagesView({ token }: ImagesViewProps) {
       setImages(imgs)
       setStatuses(sts)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load images")
+      setError(err instanceof Error ? err.message : t('images.failedLoad'))
     } finally {
       setLoading(false)
     }
@@ -133,9 +135,9 @@ export function ImagesView({ token }: ImagesViewProps) {
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Image Registry</h2>
+          <h2 className="text-2xl font-bold text-foreground">{t('images.title')}</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage engine Docker images across the cluster
+            {t('images.subtitle')}
           </p>
         </div>
         <div className="flex gap-2">
@@ -147,14 +149,14 @@ export function ImagesView({ token }: ImagesViewProps) {
             className="rounded-xl"
           >
             <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />
-            Refresh
+            {t('common.refresh')}
           </Button>
           <Button
             onClick={openCreate}
             className="bg-primary hover:bg-primary/90 rounded-xl shadow-sm px-5"
           >
             <Plus className="mr-2 h-4 w-4" />
-            Register Image
+            {t('images.register')}
           </Button>
         </div>
       </div>
@@ -170,14 +172,14 @@ export function ImagesView({ token }: ImagesViewProps) {
         <div className="px-6 py-5 border-b border-border bg-accent/30 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-foreground tracking-tight">
-              Registered Images
+              {t('images.registered')}
             </h3>
           </div>
           <Badge
             variant="outline"
             className="font-bold border-primary/20 text-primary uppercase h-6"
           >
-            {images.length} Total
+            {images.length} {t('common.total')}
           </Badge>
         </div>
 
@@ -211,7 +213,7 @@ export function ImagesView({ token }: ImagesViewProps) {
                   <div className="flex flex-col items-center justify-center opacity-40">
                     <Container className="h-12 w-12 mb-2" />
                     <p className="text-sm font-bold text-muted-foreground">
-                      No images registered yet.
+                      {t('images.noData')}
                     </p>
                   </div>
                 </TableCell>
@@ -352,16 +354,16 @@ export function ImagesView({ token }: ImagesViewProps) {
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
             <DialogTitle>
-              {editingId ? "Edit Image" : "Register New Image"}
+              {editingId ? t('images.editImage') : t('images.registerNewImage')}
             </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label htmlFor="img-id">Image ID</Label>
+              <Label htmlFor="img-id">{t('images.imageId')}</Label>
               <Input
                 id="img-id"
-                placeholder="e.g. vllm-cuda124"
+                placeholder={t('images.imageIdPlaceholder')}
                 value={form.id}
                 onChange={(e) => setForm({ ...form, id: e.target.value })}
                 disabled={!!editingId}
@@ -370,7 +372,7 @@ export function ImagesView({ token }: ImagesViewProps) {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="img-engine">Engine Type</Label>
+                <Label htmlFor="img-engine">{t('images.engineType')}</Label>
                 <select
                   id="img-engine"
                   value={form.engine_type}
@@ -386,7 +388,7 @@ export function ImagesView({ token }: ImagesViewProps) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="img-policy">Version Policy</Label>
+                <Label htmlFor="img-policy">{t('images.versionPolicy')}</Label>
                 <select
                   id="img-policy"
                   value={form.version_policy}
@@ -398,17 +400,17 @@ export function ImagesView({ token }: ImagesViewProps) {
                   }
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
-                  <option value="pin">Pin (stable)</option>
-                  <option value="rolling">Rolling (latest)</option>
+                  <option value="pin">{t('images.pinStable')}</option>
+                  <option value="rolling">{t('images.rollingLatest')}</option>
                 </select>
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="img-ref">Docker Image</Label>
+              <Label htmlFor="img-ref">{t('images.dockerImage')}</Label>
               <Input
                 id="img-ref"
-                placeholder="e.g. vllm/vllm-openai:v0.8.3"
+                placeholder={t('images.dockerImagePlaceholder')}
                 value={form.image}
                 onChange={(e) => setForm({ ...form, image: e.target.value })}
               />
@@ -416,24 +418,24 @@ export function ImagesView({ token }: ImagesViewProps) {
 
             <div className="space-y-2">
               <Label htmlFor="img-platforms">
-                Platforms{" "}
+                {t('images.platforms')} {" "}
                 <span className="text-muted-foreground font-normal">
-                  (comma-separated, empty = all)
+                  ({t('images.platformsHint')})
                 </span>
               </Label>
               <Input
                 id="img-platforms"
-                placeholder="e.g. nvidia-cuda, ascend-cann8"
+                placeholder={t('images.platformsPlaceholder')}
                 value={platformInput}
                 onChange={(e) => setPlatformInput(e.target.value)}
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="img-desc">Description</Label>
+              <Label htmlFor="img-desc">{t('templates.description')}</Label>
               <Input
                 id="img-desc"
-                placeholder="Optional description"
+                placeholder={t('templates.optional')}
                 value={form.description || ""}
                 onChange={(e) =>
                   setForm({ ...form, description: e.target.value })
@@ -452,7 +454,7 @@ export function ImagesView({ token }: ImagesViewProps) {
                 className="rounded border-input"
               />
               <Label htmlFor="img-prepull" className="font-normal">
-                Auto pre-pull on matching nodes
+                {t('images.autoPrePull')}
               </Label>
             </div>
           </div>
@@ -463,14 +465,14 @@ export function ImagesView({ token }: ImagesViewProps) {
               onClick={() => setDialogOpen(false)}
               className="rounded-xl"
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               onClick={handleSave}
               disabled={!form.id || !form.image}
               className="rounded-xl"
             >
-              {editingId ? "Update" : "Register"}
+              {editingId ? t('images.update') : t('images.register')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Bell, Search, User, Settings, LogOut } from 'lucide-react'
 import { apiDelete, apiGet, apiPost, authApi } from '@/lib/api'
 import type { AuthUser, ClusterStatus, EndpointStats, ModelLoadRequest, ModelRequest } from '@/lib/types'
+import { useI18n } from '@/lib/i18n'
 
 // Components
 import Sidebar from '@/components/Sidebar'
@@ -80,12 +81,13 @@ const readRouteFromLocation = (): { page: Page; modelUid: string | null } => {
   return { page: 'dashboard', modelUid: null }
 }
 
-const fmtTime = (v: number) => (v ? new Date(v).toLocaleString() : 'n/a')
+const fmtTime = (v: number, fallback: string) => (v ? new Date(v).toLocaleString() : fallback)
 
 const pct = (used: number, total: number) =>
   total > 0 ? Math.round((used / total) * 100) : 0
 
 function App() {
+  const { t, locale, setLocale } = useI18n()
   const initialRoute = readRouteFromLocation()
   const [token, setToken] = useState(() => localStorage.getItem('nebula_token') || '')
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
@@ -172,11 +174,11 @@ function App() {
         if (sResp.ok) setEngineStats(await sResp.json())
       } catch { /* metrics are optional */ }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data')
+      setError(err instanceof Error ? err.message : t('models.failedLoad'))
     } finally {
       setLoading(false)
     }
-  }, [token])
+  }, [token, t])
 
   useEffect(() => {
     if (token) {
@@ -201,10 +203,10 @@ function App() {
       }, token)
       await refreshAll()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load model')
+      setError(err instanceof Error ? err.message : t('models.failedLoad'))
       throw err
     }
-  }, [token, refreshAll])
+  }, [token, refreshAll, t])
 
   const handleUnload = async (id: string) => {
     setError(null)
@@ -212,7 +214,7 @@ function App() {
       await apiDelete(`/models/requests/${id}`, token)
       await refreshAll()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to unload model')
+      setError(err instanceof Error ? err.message : t('models.actionFailed'))
     }
   }
 
@@ -319,7 +321,7 @@ function App() {
   if (!authReady) {
     return (
       <div className="min-h-screen w-full bg-background flex items-center justify-center text-sm text-muted-foreground">
-        Loading session...
+        {t('app.loadingSession')}
       </div>
     )
   }
@@ -359,7 +361,7 @@ function App() {
               <div className="relative w-64">
                 <Search className="h-3.5 w-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
                 <Input
-                  placeholder="Search for models, nodes..."
+                  placeholder={t('app.searchPlaceholder')}
                   className="h-8 rounded-lg pl-8 border-border/60 bg-card"
                 />
               </div>
@@ -370,17 +372,21 @@ function App() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-44">
-                  <DropdownMenuLabel>Account</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t('app.account')}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')}>
+                    <User className="h-4 w-4" /> {t('lang.switch')}: {locale === 'zh' ? t('lang.zh') : t('lang.en')}
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => navigateToPage('profile')}>
-                    <User className="h-4 w-4" /> Edit Profile
+                    <User className="h-4 w-4" /> {t('app.editProfile')}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigateToPage('account-settings')}>
-                    <Settings className="h-4 w-4" /> Account Settings
+                    <Settings className="h-4 w-4" /> {t('app.accountSettings')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem variant="destructive" onClick={handleLogout}>
-                    <LogOut className="h-4 w-4" /> Logout
+                    <LogOut className="h-4 w-4" /> {t('app.logout')}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -432,7 +438,7 @@ function App() {
             overview={overview}
             gpuModel={gpuModel}
             pct={pct}
-            fmtTime={fmtTime}
+            fmtTime={(v) => fmtTime(v, t('common.n_a'))}
           />
         )}
         {page === 'settings' && (

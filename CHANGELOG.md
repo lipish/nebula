@@ -6,6 +6,18 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [2026-02-15]
+
+### Added
+- Added full frontend i18n infrastructure via `frontend/src/lib/i18n.tsx` with locale persistence and interpolation support.
+- Added Chinese/English language switch entry in the account menu and default locale bootstrap to Chinese.
+- Added `docs/i18n_acceptance_checklist.md` for end-to-end bilingual QA and regression checks.
+
+### Changed
+- Migrated major frontend views and dialogs to translation keys, including Dashboard, Models, Inference, Catalog/Library, Templates/Images, Login, Settings, Profile, and Account pages.
+- Updated app bootstrap to wrap `App` with `I18nProvider` in `frontend/src/main.tsx`.
+- Expanded i18n dictionaries to cover all currently referenced frontend translation keys in both `zh` and `en`.
+
 ### Changed
 - Updated `bin/nebula-up.sh` with xtrace preflight validation to fail fast when `XTRACE_AUTH_MODE=service` but `XTRACE_TOKEN` is empty.
 

@@ -7,6 +7,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import type { ClusterStatus, EndpointStats } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 interface EndpointsProps {
   overview: ClusterStatus;
@@ -23,6 +24,7 @@ const statusStyle = (s: string): string => {
 };
 
 export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
+  const { t } = useI18n();
   const [search, setSearch] = useState("");
 
   // Build stats lookup: (model_uid, replica_id) -> EndpointStats
@@ -115,17 +117,17 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
   }, [overview.nodes]);
 
   const summaryCards = [
-    { label: "Total Endpoints", value: String(totalEndpoints), icon: Server },
-    { label: "Active GPUs", value: String(activeGpus), icon: Cpu },
-    { label: "Total VRAM Used", value: `${totalVram} GB`, icon: HardDrive },
+    { label: t('endpoints.total'), value: String(totalEndpoints), icon: Server },
+    { label: t('endpoints.activeGpus'), value: String(activeGpus), icon: Cpu },
+    { label: t('endpoints.totalVram'), value: `${totalVram} GB`, icon: HardDrive },
   ];
 
   return (
     <>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-foreground mb-1">Endpoints</h2>
-          <p className="text-sm text-muted-foreground">Manage and monitor serving model instances</p>
+          <h2 className="text-2xl font-bold text-foreground mb-1">{t('endpoints.title')}</h2>
+          <p className="text-sm text-muted-foreground">{t('endpoints.subtitle')}</p>
         </div>
       </div>
 
@@ -151,7 +153,7 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
             <Search className="h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search endpoints..."
+              placeholder={t('endpoints.searchPlaceholder')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
@@ -159,7 +161,7 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
           </div>
           <button className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors">
             <Filter className="h-4 w-4" />
-            All Status
+            {t('endpoints.allStatus')}
           </button>
         </div>
 
@@ -167,14 +169,14 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-10"><Checkbox /></TableHead>
-              <TableHead className="font-medium">Endpoint</TableHead>
-              <TableHead className="font-medium">Node / GPU</TableHead>
-              <TableHead className="font-medium">VRAM</TableHead>
-              <TableHead className="font-medium">KV Cache</TableHead>
-              <TableHead className="font-medium">Pending</TableHead>
-              <TableHead className="font-medium">Engine</TableHead>
-              <TableHead className="font-medium">Replicas</TableHead>
-              <TableHead className="font-medium">Status</TableHead>
+              <TableHead className="font-medium">{t('endpoints.endpoint')}</TableHead>
+              <TableHead className="font-medium">{t('endpoints.nodeGpu')}</TableHead>
+              <TableHead className="font-medium">{t('endpoints.vram')}</TableHead>
+              <TableHead className="font-medium">{t('endpoints.kvCache')}</TableHead>
+              <TableHead className="font-medium">{t('endpoints.pending')}</TableHead>
+              <TableHead className="font-medium">{t('endpoints.engine')}</TableHead>
+              <TableHead className="font-medium">{t('endpoints.replicas')}</TableHead>
+              <TableHead className="font-medium">{t('common.status')}</TableHead>
               <TableHead className="w-10"></TableHead>
             </TableRow>
           </TableHeader>
@@ -182,7 +184,7 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
-                  No endpoints found
+                  {t('endpoints.notFound')}
                 </TableCell>
               </TableRow>
             ) : (
@@ -195,7 +197,7 @@ export function EndpointsView({ overview, pct, engineStats }: EndpointsProps) {
                     <TableCell>
                       <div>
                         <p className="font-mono text-sm font-medium">{ep.model_uid}</p>
-                        <p className="text-xs text-muted-foreground">replica {ep.replica_id}</p>
+                        <p className="text-xs text-muted-foreground">{t('endpoints.replica')} {ep.replica_id}</p>
                       </div>
                     </TableCell>
                     <TableCell>

@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { apiGet, apiGetWithParams, v2 } from "@/lib/api"
 import type { ClusterStatus, EngineImage, ModelLoadRequest, ModelSearchResult, ModelTemplate } from "@/lib/types"
+import { useI18n } from "@/lib/i18n"
 
 type Step = "search" | "configure" | "templates"
 type Source = "huggingface" | "modelscope"
@@ -83,6 +84,7 @@ export function LoadModelDialog({
     onSubmit,
     onUnloadRequestId,
 }: LoadModelDialogProps) {
+    const { t } = useI18n()
     const [step, setStep] = useState<Step>("search")
     const [source, setSource] = useState<Source>("huggingface")
     const [query, setQuery] = useState("")
@@ -307,14 +309,14 @@ export function LoadModelDialog({
             <DialogContent className="max-w-2xl h-[70vh] flex flex-col overflow-hidden rounded-2xl">
                 <DialogHeader>
                     <DialogTitle className="text-xl font-bold">
-                        {step === "search" ? "Search & Select Model" : step === "templates" ? "Deploy from Template" : "Configure Deployment"}
+                        {step === "search" ? t('loadDialog.title.search') : step === "templates" ? t('loadDialog.title.templates') : t('loadDialog.title.configure')}
                     </DialogTitle>
                     <DialogDescription>
                         {step === "search"
-                            ? "Search models from HuggingFace or ModelScope"
+                            ? t('loadDialog.desc.search')
                             : step === "templates"
-                                ? "Choose a pre-configured template to deploy"
-                                : `Deploy ${selectedModel?.id ?? form.model_name}`}
+                                ? t('loadDialog.desc.templates')
+                                : t('loadDialog.desc.configure', { model: selectedModel?.id ?? form.model_name })}
                     </DialogDescription>
                 </DialogHeader>
 
@@ -349,7 +351,7 @@ export function LoadModelDialog({
                             <div className="relative flex-1">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                 <Input
-                                    placeholder="Search models, e.g. Qwen2.5, Llama, DeepSeek..."
+                                    placeholder={t('loadDialog.searchPlaceholder')}
                                     className="pl-9 rounded-xl h-9"
                                     value={query}
                                     onChange={(e) => handleQueryChange(e.target.value)}
@@ -363,7 +365,7 @@ export function LoadModelDialog({
                             {searching && (
                                 <div className="flex items-center justify-center py-12 text-muted-foreground">
                                     <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                                    <span className="text-sm">Searching...</span>
+                                    <span className="text-sm">{t('loadDialog.searching')}</span>
                                 </div>
                             )}
                             {searchError && (
@@ -371,14 +373,14 @@ export function LoadModelDialog({
                             )}
                             {!searching && !searchError && results.length === 0 && query.length >= 2 && (
                                 <div className="text-center py-12 text-muted-foreground text-sm">
-                                    No models found. Try a different keyword.
+                                    {t('loadDialog.noModelsFound')}
                                 </div>
                             )}
                             {!searching && !searchError && results.length === 0 && query.length < 2 && (
                                 <div className="space-y-3">
                                     <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground uppercase tracking-wider">
                                         <Sparkles className="h-3.5 w-3.5" />
-                                        Popular Models
+                                        {t('loadDialog.popularModels')}
                                     </div>
                                     <div className="grid gap-1.5">
                                         {POPULAR_MODELS[source].map((model) => (
@@ -471,14 +473,14 @@ export function LoadModelDialog({
                                 }}
                                 className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                             >
-                                Or enter model path manually →
+                                {t('loadDialog.manualEntry')}
                             </button>
                             <button
                                 onClick={() => setStep("templates")}
                                 className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary/80 transition-colors"
                             >
                                 <LayoutTemplate className="h-3.5 w-3.5" />
-                                From Template
+                                {t('loadDialog.fromTemplate')}
                             </button>
                         </div>
                     </div>
@@ -490,18 +492,18 @@ export function LoadModelDialog({
                             onClick={() => setStep("search")}
                             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
                         >
-                            <ArrowLeft className="h-3.5 w-3.5" /> Back to search
+                            <ArrowLeft className="h-3.5 w-3.5" /> {t('loadDialog.backToSearch')}
                         </button>
                         <div className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1">
                             {loadingTemplates && (
                                 <div className="flex items-center justify-center py-12 text-muted-foreground">
                                     <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                                    <span className="text-sm">Loading templates...</span>
+                                    <span className="text-sm">{t('loadDialog.loadingTemplates')}</span>
                                 </div>
                             )}
                             {!loadingTemplates && templates.length === 0 && (
                                 <div className="text-center py-12 text-muted-foreground text-sm">
-                                    No templates available yet.
+                                    {t('loadDialog.noTemplates')}
                                 </div>
                             )}
                             {!loadingTemplates && (() => {
@@ -527,7 +529,7 @@ export function LoadModelDialog({
                                                             await v2.deployTemplate(tmpl.template_id, {}, token)
                                                             onOpenChange(false)
                                                         } catch (err) {
-                                                            setSearchError(err instanceof Error ? err.message : "Deploy failed")
+                                                            setSearchError(err instanceof Error ? err.message : t('loadDialog.deployFailed'))
                                                         } finally {
                                                             setDeployingTemplate(null)
                                                         }
@@ -574,28 +576,28 @@ export function LoadModelDialog({
                             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
                         >
                             <ArrowLeft className="h-3 w-3" />
-                            Back to search
+                            {t('loadDialog.backToSearch')}
                         </button>
 
                         {/* GPU selection */}
                         <div className="space-y-3">
                             <div className="flex items-center justify-between">
-                                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Target Hardware</label>
+                                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{t('loadDialog.targetHardware')}</label>
                                 {selectedGpuIndices.size > 1 && (
                                     <Badge variant="secondary" className="text-[10px] font-bold">
-                                        {selectedGpuIndices.size} GPUs · Tensor Parallel
+                                        {t('loadDialog.gpuTensorParallel', { count: selectedGpuIndices.size })}
                                     </Badge>
                                 )}
                             </div>
                             <div className="text-[10px] text-muted-foreground/70">
-                                Percent is <span className="font-semibold">used%</span>. <span className="font-semibold text-destructive">Red</span> means high VRAM usage (&gt; 80% used) or low free VRAM. <span className="font-semibold">IN USE</span> means occupied by an existing placement.
+                                {t('loadDialog.vramHint')}
                             </div>
 
                             {(occupiedEntries.length > 0 || usedGpus.size > 0) && (
                                 <div className="rounded-xl border border-border/60 bg-background p-3">
                                     <div className="flex items-center justify-between">
-                                        <div className="text-[11px] font-bold text-muted-foreground/80">Occupied Models</div>
-                                        <div className="text-[10px] text-muted-foreground/70">Unload to free GPUs</div>
+                                        <div className="text-[11px] font-bold text-muted-foreground/80">{t('loadDialog.occupiedModels')}</div>
+                                        <div className="text-[10px] text-muted-foreground/70">{t('loadDialog.unloadToFreeGpus')}</div>
                                     </div>
                                     <div className="mt-2 space-y-2">
                                         {occupiedEntries.map(([modelUid, requestId]) => (
@@ -610,13 +612,13 @@ export function LoadModelDialog({
                                                     }}
                                                     disabled={submitting}
                                                 >
-                                                    Unload
+                                                    {t('loadDialog.unload')}
                                                 </Button>
                                             </div>
                                         ))}
                                         {occupiedEntries.length === 0 && (
                                             <div className="text-[10px] text-muted-foreground/70">
-                                                No unloadable placements found (missing request_id).
+                                                {t('loadDialog.noUnloadablePlacements')}
                                             </div>
                                         )}
                                     </div>
@@ -667,9 +669,9 @@ export function LoadModelDialog({
                                                                         </div>
                                                                         <div className="flex items-center gap-2">
                                                                             <span className={cn("text-[10px] font-bold", lowVram ? "text-destructive" : "text-muted-foreground")}>
-                                                                                Free {freeGb} GB (Total {totalGb} GB)
+                                                                                {t('loadDialog.freeTotal', { free: freeGb, total: totalGb })}
                                                                             </span>
-                                                                            <span className="text-[10px] font-bold text-muted-foreground">{usage}% used</span>
+                                                                            <span className="text-[10px] font-bold text-muted-foreground">{t('loadDialog.usedPct', { value: usage })}</span>
                                                                         </div>
                                                                     </div>
                                                                     <div className="h-1 w-full bg-accent rounded-full overflow-hidden">
@@ -683,12 +685,12 @@ export function LoadModelDialog({
                                                                     {lowVram && isSel && (
                                                                         <div className="flex items-center gap-1 mt-1.5 text-[10px] text-amber-500">
                                                                             <AlertTriangle className="h-3 w-3" />
-                                                                            Low VRAM — model may fail to load
+                                                                            {t('loadDialog.lowVram')}
                                                                         </div>
                                                                     )}
                                                                 </div>
                                                                 {isUsed && !isSel && (
-                                                                    <Badge className="ml-2 text-[9px] font-bold bg-secondary text-secondary-foreground border-0">IN USE</Badge>
+                                                                    <Badge className="ml-2 text-[9px] font-bold bg-secondary text-secondary-foreground border-0">{t('loadDialog.inUse')}</Badge>
                                                                 )}
                                                                 {isSel && (
                                                                     <div className="ml-2 h-4 w-4 rounded-full bg-primary flex items-center justify-center">
@@ -706,7 +708,7 @@ export function LoadModelDialog({
                                                                     }}
                                                                     disabled={submitting}
                                                                 >
-                                                                    Unload
+                                                                    {t('loadDialog.unload')}
                                                                 </Button>
                                                             )}
                                                         </div>
@@ -719,14 +721,14 @@ export function LoadModelDialog({
                             </div>
                             {selectedGpuIndices.size > 1 && (
                                 <p className="text-[11px] text-muted-foreground">
-                                    Multi-GPU selected — tensor_parallel_size will be set to {selectedGpuIndices.size} automatically.
+                                    {t('loadDialog.multiGpuAutoTensor', { count: selectedGpuIndices.size })}
                                 </p>
                             )}
                         </div>
 
                         {/* Engine selection */}
                         <div className="space-y-3">
-                            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Engine</label>
+                            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{t('models.engine')}</label>
                             <div className="flex gap-2">
                                 <div className="flex rounded-xl border border-border overflow-hidden">
                                     {["vllm", "sglang"].map((eng) => (
@@ -750,7 +752,7 @@ export function LoadModelDialog({
                                         value={form.docker_image ?? ""}
                                         onChange={(e) => setForm(prev => ({ ...prev, docker_image: e.target.value || null }))}
                                     >
-                                        <option value="">Default (node CLI config)</option>
+                                        <option value="">{t('loadDialog.defaultNodeCli')}</option>
                                         {imagesForEngine.map((img) => (
                                             <option key={img.id} value={img.image}>
                                                 {img.image}{img.description ? ` — ${img.description}` : ""}
@@ -761,8 +763,7 @@ export function LoadModelDialog({
                             </div>
                             {imagesForEngine.length === 0 && (
                                 <p className="text-[10px] text-muted-foreground/70">
-                                    No registered images for {form.engine_type === "vllm" ? "vLLM" : "SGLang"}. Will use node default config.
-                                    Register images in the Images page.
+                                    {t('loadDialog.noRegisteredImages', { engine: form.engine_type === 'vllm' ? 'vLLM' : 'SGLang' })}
                                 </p>
                             )}
                         </div>
@@ -770,28 +771,28 @@ export function LoadModelDialog({
                         {/* Model config fields */}
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div className="space-y-1.5">
-                                <label className="text-xs font-bold text-muted-foreground uppercase">Model Path</label>
+                                <label className="text-xs font-bold text-muted-foreground uppercase">{t('loadDialog.modelPath')}</label>
                                 <Input
-                                    placeholder="e.g. Qwen/Qwen2.5-0.5B-Instruct"
+                                    placeholder={t('loadDialog.modelPathPlaceholder')}
                                     className="rounded-xl h-10"
                                     value={form.model_name}
                                     onChange={(e) => setForm({ ...form, model_name: e.target.value })}
                                 />
                                 <div className="text-[10px] text-muted-foreground/70">
-                                    GGUF requires a local .gguf file path (e.g. /DATA/Model/.../*.gguf).
+                                    {t('loadDialog.ggufHint')}
                                 </div>
                             </div>
                             <div className="space-y-1.5">
-                                <label className="text-xs font-bold text-muted-foreground uppercase">Deployment UID</label>
+                                <label className="text-xs font-bold text-muted-foreground uppercase">{t('loadDialog.deploymentUid')}</label>
                                 <Input
-                                    placeholder="e.g. qwen2.5-7b"
+                                    placeholder={t('loadDialog.deploymentUidPlaceholder')}
                                     className="rounded-xl h-10 font-mono"
                                     value={form.model_uid}
                                     onChange={(e) => setForm({ ...form, model_uid: e.target.value })}
                                 />
                             </div>
                             <div className="space-y-1.5">
-                                <label className="text-xs font-bold text-muted-foreground uppercase">Replicas</label>
+                                <label className="text-xs font-bold text-muted-foreground uppercase">{t('models.replicas')}</label>
                                 <Input
                                     type="number"
                                     className="rounded-xl h-10"
@@ -800,7 +801,7 @@ export function LoadModelDialog({
                                 />
                             </div>
                             <div className="space-y-1.5">
-                                <label className="text-xs font-bold text-muted-foreground uppercase">Context Window</label>
+                                <label className="text-xs font-bold text-muted-foreground uppercase">{t('loadDialog.contextWindow')}</label>
                                 <Input
                                     type="number"
                                     placeholder="4096"
@@ -823,7 +824,7 @@ export function LoadModelDialog({
                 {step === "configure" && (
                     <DialogFooter className="border-t border-border/50 pt-4">
                         <Button variant="outline" className="rounded-xl" onClick={() => onOpenChange(false)}>
-                            Cancel
+                            {t('common.cancel')}
                         </Button>
                         <Button
                             className="bg-primary font-bold rounded-xl px-6"
@@ -833,10 +834,10 @@ export function LoadModelDialog({
                             {submitting ? (
                                 <>
                                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                    Deploying...
+                                    {t('loadDialog.deploying')}
                                 </>
                             ) : (
-                                "Launch Model"
+                                t('loadDialog.launchModel')
                             )}
                         </Button>
                     </DialogFooter>

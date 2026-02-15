@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { apiGetWithParams, v2 } from '@/lib/api'
 import type { ModelView } from '@/lib/types'
+import { useI18n } from '@/lib/i18n'
 
 interface ModelCatalogViewProps {
   token: string
@@ -39,6 +40,7 @@ const SOURCE_OPTIONS = [
 ] as const
 
 export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCatalogViewProps) {
+  const { t } = useI18n()
   const [models, setModels] = useState<ModelView[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -191,18 +193,18 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Model Catalog</h2>
+          <h2 className="text-2xl font-bold text-foreground">{t('catalog.title')}</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Search and import models from Hugging Face or ModelScope
+            {t('catalog.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={onOpenModels} className="rounded-xl">
-            Downloaded Models
+            {t('catalog.downloadedModels')}
           </Button>
           <Button variant="outline" size="sm" onClick={refresh} disabled={loading} className="rounded-xl">
             <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            {t('common.refresh')}
           </Button>
         </div>
       </div>
@@ -216,9 +218,9 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
       {activeDownloadUid && (
         <div className="bg-primary/10 border border-primary/20 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-foreground">Download Task</p>
+            <p className="text-sm font-semibold text-foreground">{t('catalog.downloadTask')}</p>
             <p className="text-xs text-muted-foreground">
-              {activeDownloadUid} · {activeDownloadModel ? activeDownloadModel.state : 'submitted'}
+              {activeDownloadUid} · {activeDownloadModel ? activeDownloadModel.state : t('catalog.submitted')}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -229,7 +231,7 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
                 className="rounded-xl"
                 onClick={() => onSelectModel(activeDownloadUid)}
               >
-                Open Status
+                {t('catalog.openStatus')}
               </Button>
             )}
             <Button
@@ -238,7 +240,7 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
               className="rounded-xl"
               onClick={() => setActiveDownloadUid(null)}
             >
-              Dismiss
+              {t('catalog.dismiss')}
             </Button>
           </div>
         </div>
@@ -246,11 +248,11 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
 
       <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
         <div className="px-6 py-5 border-b border-border bg-accent/30">
-          <h3 className="text-lg font-bold text-foreground tracking-tight">Browse & Download</h3>
+          <h3 className="text-lg font-bold text-foreground tracking-tight">{t('catalog.browse')}</h3>
         </div>
         <div className="p-6 grid grid-cols-1 md:grid-cols-12 gap-3">
           <div className="space-y-2">
-            <Label htmlFor="catalog-source">Source</Label>
+            <Label htmlFor="catalog-source">{t('catalog.source')}</Label>
             <select
               id="catalog-source"
               value={source}
@@ -265,12 +267,12 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
             </select>
           </div>
           <div className="space-y-2 md:col-span-8">
-            <Label htmlFor="catalog-search">Search Model</Label>
+            <Label htmlFor="catalog-search">{t('catalog.searchModel')}</Label>
             <div className="relative">
               <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
               <Input
                 id="catalog-search"
-                placeholder="Search models, e.g. Qwen2.5-7B, bge-m3, llama..."
+                placeholder={t('catalog.searchPlaceholder')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9"
@@ -278,14 +280,14 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
             </div>
           </div>
           <div className="space-y-2 md:col-span-3">
-            <Label htmlFor="catalog-task-filter">Task</Label>
+            <Label htmlFor="catalog-task-filter">{t('catalog.task')}</Label>
             <select
               id="catalog-task-filter"
               value={taskFilter}
               onChange={(e) => setTaskFilter(e.target.value)}
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             >
-              <option value="all">All Tasks</option>
+              <option value="all">{t('catalog.allTasks')}</option>
               {taskOptions
                 .filter((option) => option !== 'all')
                 .map((option) => (
@@ -299,18 +301,18 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
           <Table>
             <TableHeader>
               <TableRow className="bg-muted hover:bg-muted border-b border-border">
-                <TableHead className="text-[11px] font-bold text-muted-foreground uppercase pl-6 pr-4 py-4">Model</TableHead>
-                <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">Task</TableHead>
-                <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">Downloads</TableHead>
-                <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">Likes</TableHead>
-                <TableHead className="text-right text-[11px] font-bold text-muted-foreground uppercase pl-4 pr-6 py-4">Actions</TableHead>
+                <TableHead className="text-[11px] font-bold text-muted-foreground uppercase pl-6 pr-4 py-4">{t('models.model')}</TableHead>
+                <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">{t('catalog.task')}</TableHead>
+                <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">{t('catalog.downloads')}</TableHead>
+                <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">{t('catalog.likes')}</TableHead>
+                <TableHead className="text-right text-[11px] font-bold text-muted-foreground uppercase pl-4 pr-6 py-4">{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {visibleResults.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="h-28 text-center text-sm text-muted-foreground">
-                    {searching ? 'Searching models...' : 'No models found for current filters.'}
+                    {searching ? t('catalog.searching') : t('catalog.empty')}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -325,7 +327,7 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
                           <div className="font-bold text-sm tracking-tight">{result.id}</div>
                           {firstDownloaded && (
                             <Badge variant="secondary" className="text-[10px] font-bold uppercase">
-                              Downloaded
+                              {t('catalog.downloaded')}
                             </Badge>
                           )}
                         </div>
@@ -361,7 +363,7 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
                               className="rounded-xl h-8"
                               onClick={() => onSelectModel(firstDownloaded.model_uid)}
                             >
-                              Imported
+                              {t('catalog.imported')}
                             </Button>
                           ) : (
                             <Button
@@ -371,7 +373,7 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
                               onClick={() => openDownloadDialog(result)}
                             >
                               <Download className="mr-1.5 h-3.5 w-3.5" />
-                              Import
+                              {t('catalog.import')}
                             </Button>
                           )}
                         </div>
@@ -398,37 +400,37 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
       >
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Download Model</DialogTitle>
+            <DialogTitle>{t('catalog.downloadModel')}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             <div className="space-y-1">
-              <p className="text-sm font-medium text-foreground">Model</p>
+              <p className="text-sm font-medium text-foreground">{t('models.model')}</p>
               <p className="text-sm text-muted-foreground break-all">
                 {selectedResult?.id || '—'}
               </p>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="download-model-uid">Model UID (optional)</Label>
+              <Label htmlFor="download-model-uid">{t('catalog.modelUidOptional')}</Label>
               <Input
                 id="download-model-uid"
-                placeholder="auto-generated"
+                placeholder={t('catalog.autoGenerated')}
                 value={downloadModelUid}
                 onChange={(e) => setDownloadModelUid(e.target.value)}
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="download-model-path">Download Path (optional)</Label>
+              <Label htmlFor="download-model-path">{t('catalog.downloadPathOptional')}</Label>
               <Input
                 id="download-model-path"
-                placeholder="e.g. /DATA/Model or /mnt/models"
+                placeholder={t('library.newPathPlaceholder')}
                 value={downloadPath}
                 onChange={(e) => setDownloadPath(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                If empty, Nebula uses the node default model directory.
+                {t('catalog.pathHint')}
               </p>
             </div>
           </div>
@@ -439,11 +441,11 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
               onClick={() => setDownloadDialogOpen(false)}
               disabled={importing}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button onClick={handleDownloadConfirm} disabled={!selectedResult || importing}>
               <Download className="mr-1.5 h-4 w-4" />
-              {importing ? 'Downloading...' : 'Start Download'}
+              {importing ? t('catalog.downloading') : t('catalog.startDownload')}
             </Button>
           </DialogFooter>
         </DialogContent>

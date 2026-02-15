@@ -5,12 +5,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { authApi } from '@/lib/api'
 import type { AuthUser } from '@/lib/types'
+import { useI18n } from '@/lib/i18n'
 
 interface LoginViewProps {
   onLoginSuccess: (token: string, user: AuthUser) => void
 }
 
 export function LoginView({ onLoginSuccess }: LoginViewProps) {
+  const { t } = useI18n()
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('admin123')
   const [remember, setRemember] = useState(true)
@@ -25,7 +27,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
       const result = await authApi.login(username.trim(), password)
       onLoginSuccess(result.token, result.user)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed')
+      setError(err instanceof Error ? err.message : t('login.failed'))
     } finally {
       setLoading(false)
     }
@@ -41,9 +43,9 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
           </div>
 
           <div className="mt-auto mb-auto max-w-md">
-            <h1 className="text-5xl font-bold leading-tight">Enterprise AI Model Management Platform</h1>
+            <h1 className="text-5xl font-bold leading-tight">{t('login.heroTitle')}</h1>
             <p className="mt-5 text-lg text-white/70 leading-8">
-              Deploy, manage, and scale your AI models with confidence. Built for teams that demand reliability.
+              {t('login.heroDesc')}
             </p>
           </div>
 
@@ -53,12 +55,12 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
         <div className="bg-background px-8 lg:px-16 py-10 flex items-center justify-center">
           <div className="w-full max-w-sm space-y-5">
             <div>
-              <h2 className="text-4xl font-semibold text-foreground">Sign in</h2>
-              <p className="text-sm text-muted-foreground mt-2">Enter your credentials to access the platform</p>
+              <h2 className="text-4xl font-semibold text-foreground">{t('login.signIn')}</h2>
+              <p className="text-sm text-muted-foreground mt-2">{t('login.subtitle')}</p>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="login-username" className="text-sm">Email</Label>
+              <Label htmlFor="login-username" className="text-sm">{t('login.email')}</Label>
               <div className="relative">
                 <UserRound className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
                 <Input
@@ -73,8 +75,8 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="login-password" className="text-sm">Password</Label>
-                <button type="button" className="text-xs text-muted-foreground hover:text-foreground">Forgot password?</button>
+                <Label htmlFor="login-password" className="text-sm">{t('login.password')}</Label>
+                <button type="button" className="text-xs text-muted-foreground hover:text-foreground">{t('login.forgot')}</button>
               </div>
               <div className="relative">
                 <KeyRound className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
@@ -105,20 +107,20 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
                 checked={remember}
                 onChange={(e) => setRemember(e.target.checked)}
               />
-              Remember me
+              {t('login.remember')}
             </label>
 
             {error && <p className="text-sm text-destructive">{error}</p>}
 
             <Button className="w-full rounded-lg h-11" onClick={submit} disabled={loading}>
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? t('login.signingIn') : t('login.signIn')}
             </Button>
 
             <p className="text-sm text-muted-foreground text-center">
-              Don't have an account? <span className="font-medium text-foreground">Contact admin</span>
+              {t('login.noAccount')} <span className="font-medium text-foreground">{t('login.contactAdmin')}</span>
             </p>
 
-            <p className="text-xs text-muted-foreground text-center">Demo: admin / admin123</p>
+            <p className="text-xs text-muted-foreground text-center">{t('login.demo')}</p>
           </div>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { Activity, Zap, TrendingUp, Gauge, Timer, AlertTriangle } from "lucide-r
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import type { ClusterStatus, EndpointStats } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 interface GatewayMetrics {
   requests_total: number;
@@ -113,6 +114,7 @@ interface InferenceProps {
 }
 
 export function InferenceView({ overview, metricsRaw, engineStats }: InferenceProps) {
+  const { t } = useI18n();
   const gw = useMemo(() => parseGatewayMetrics(metricsRaw), [metricsRaw]);
   const routerModels = useMemo(() => parseRouterModelMetrics(metricsRaw), [metricsRaw]);
 
@@ -141,10 +143,10 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
   }, [engineStats]);
 
   const stats = [
-    { label: "Total Requests", value: gw.requests_total.toLocaleString(), icon: Activity },
-    { label: "In-Flight", value: gw.requests_inflight.toLocaleString(), icon: Gauge },
-    { label: "Active Endpoints", value: String(overview.endpoints.length), icon: Zap },
-    { label: "Success Rate", value: successRate === "—" ? "—" : `${successRate}%`, icon: TrendingUp },
+    { label: t('inference.totalRequests'), value: gw.requests_total.toLocaleString(), icon: Activity },
+    { label: t('inference.inFlight'), value: gw.requests_inflight.toLocaleString(), icon: Gauge },
+    { label: t('inference.activeEndpoints'), value: String(overview.endpoints.length), icon: Zap },
+    { label: t('inference.successRate'), value: successRate === "—" ? "—" : `${successRate}%`, icon: TrendingUp },
   ];
 
   const responseData = useMemo(() => [
@@ -154,10 +156,10 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
   ], [gw]);
 
   const authData = useMemo(() => [
-    { name: "Missing", count: gw.auth_missing },
-    { name: "Invalid", count: gw.auth_invalid },
-    { name: "Forbidden", count: gw.auth_forbidden },
-    { name: "Rate Limited", count: gw.auth_rate_limited },
+    { name: t('inference.authMissing'), count: gw.auth_missing },
+    { name: t('inference.authInvalid'), count: gw.auth_invalid },
+    { name: t('inference.authForbidden'), count: gw.auth_forbidden },
+    { name: t('inference.authRateLimited'), count: gw.auth_rate_limited },
   ], [gw]);
 
   const statusStyle = (s: string): string => {
@@ -176,17 +178,17 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
 
   return (
     <>
-      <h2 className="text-2xl font-bold text-foreground mb-1">Inference</h2>
-      <p className="text-sm text-muted-foreground mb-6">Monitor real-time inference performance and gateway metrics</p>
+      <h2 className="text-2xl font-bold text-foreground mb-1">{t('inference.title')}</h2>
+      <p className="text-sm text-muted-foreground mb-6">{t('inference.subtitle')}</p>
 
       {/* Overload Alert */}
       {overloadedModels.length > 0 && (
         <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-4 mb-6 flex items-center gap-3">
           <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0" />
           <div>
-            <p className="text-sm font-bold text-destructive">Overload Detected</p>
+            <p className="text-sm font-bold text-destructive">{t('inference.overloadDetected')}</p>
             <p className="text-xs text-destructive/80 mt-0.5">
-              All endpoints overloaded (KV cache &gt;95%) for: <span className="font-mono font-bold">{overloadedModels.join(", ")}</span>. New requests will receive 429 responses.
+              {t('inference.overloadDesc', { models: overloadedModels.join(', ') })}
             </p>
           </div>
         </div>
@@ -209,18 +211,18 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
       {routerModels.length > 0 && (
         <div className="bg-card border border-border rounded-2xl p-6 mb-6">
           <div className="mb-5">
-            <h3 className="text-base font-bold text-foreground">Per-Model Routing Metrics</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">E2E latency, TTFT, and request counts from the Router</p>
+            <h3 className="text-base font-bold text-foreground">{t('inference.perModelRouting')}</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{t('inference.perModelRoutingDesc')}</p>
           </div>
           <div className="overflow-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left font-medium text-muted-foreground py-3 px-2">Model</th>
-                  <th className="text-left font-medium text-muted-foreground py-3 px-2">Requests</th>
+                  <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('models.model')}</th>
+                  <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.requests')}</th>
                   <th className="text-left font-medium text-muted-foreground py-3 px-2">2xx / 4xx / 5xx</th>
-                  <th className="text-left font-medium text-muted-foreground py-3 px-2">Avg Latency</th>
-                  <th className="text-left font-medium text-muted-foreground py-3 px-2">Avg TTFT</th>
+                  <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.avgLatency')}</th>
+                  <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.avgTtft')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -264,8 +266,8 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
       {engineStats.length > 0 && (
         <div className="bg-card border border-border rounded-2xl p-6 mb-6">
           <div className="mb-5">
-            <h3 className="text-base font-bold text-foreground">Engine Stats</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">KV cache usage and pending requests per endpoint</p>
+            <h3 className="text-base font-bold text-foreground">{t('inference.engineStats')}</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{t('inference.engineStatsDesc')}</p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {engineStats.map((s) => {
@@ -280,18 +282,18 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-[11px] font-bold text-muted-foreground/70 uppercase">
-                      <span>KV Cache</span>
+                      <span>{t('inference.kvCache')}</span>
                       <span className={isOverloaded ? "text-destructive" : "text-foreground"}>{kvPct}%</span>
                     </div>
                     <Progress value={kvPct} className={`h-1.5 ${isOverloaded ? "[&>div]:bg-destructive" : ""}`} />
                   </div>
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-bold text-muted-foreground/70 uppercase">Pending</span>
+                    <span className="font-bold text-muted-foreground/70 uppercase">{t('inference.pending')}</span>
                     <span className="font-bold text-foreground">{s.pending_requests}</span>
                   </div>
                   {s.prefix_cache_hit_rate != null && (
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-bold text-muted-foreground/70 uppercase">Prefix Cache Hit</span>
+                      <span className="font-bold text-muted-foreground/70 uppercase">{t('inference.prefixCacheHit')}</span>
                       <span className="font-bold text-foreground">{(s.prefix_cache_hit_rate * 100).toFixed(1)}%</span>
                     </div>
                   )}
@@ -307,8 +309,8 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
         {/* Response Status Chart */}
         <div className="bg-card border border-border rounded-2xl p-6">
           <div className="mb-5">
-            <h3 className="text-base font-bold text-foreground">Response Status</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Breakdown by HTTP status code</p>
+            <h3 className="text-base font-bold text-foreground">{t('inference.responseStatus')}</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{t('inference.responseStatusDesc')}</p>
           </div>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
@@ -317,7 +319,7 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
                 <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
-                <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} barSize={40} name="Count" />
+                <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} barSize={40} name={t('inference.count')} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -326,8 +328,8 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
         {/* Auth Events Chart */}
         <div className="bg-card border border-border rounded-2xl p-6">
           <div className="mb-5">
-            <h3 className="text-base font-bold text-foreground">Auth Events</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Authentication and authorization failures</p>
+            <h3 className="text-base font-bold text-foreground">{t('inference.authEvents')}</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{t('inference.authEventsDesc')}</p>
           </div>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
@@ -336,7 +338,7 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
                 <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
-                <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} barSize={40} name="Count" />
+                <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} barSize={40} name={t('inference.count')} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -345,25 +347,25 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
 
       {/* Active Endpoints */}
       <div className="bg-card border border-border rounded-2xl p-6">
-        <h3 className="text-base font-bold text-foreground mb-1">Active Endpoints</h3>
-        <p className="text-xs text-muted-foreground mb-4">Model instances currently serving inference</p>
+        <h3 className="text-base font-bold text-foreground mb-1">{t('inference.activeEndpoints')}</h3>
+        <p className="text-xs text-muted-foreground mb-4">{t('inference.activeEndpointsDesc')}</p>
 
         <div className="overflow-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">Model</th>
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">Replica</th>
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">Node</th>
+                <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('models.model')}</th>
+                <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.replica')}</th>
+                <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.node')}</th>
                 <th className="text-left font-medium text-muted-foreground py-3 px-2">API</th>
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">Status</th>
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">Base URL</th>
+                <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('common.status')}</th>
+                <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.baseUrl')}</th>
               </tr>
             </thead>
             <tbody>
               {overview.endpoints.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center text-muted-foreground py-8">No active endpoints</td>
+                  <td colSpan={6} className="text-center text-muted-foreground py-8">{t('inference.noActiveEndpoints')}</td>
                 </tr>
               ) : (
                 overview.endpoints.map((ep) => (
