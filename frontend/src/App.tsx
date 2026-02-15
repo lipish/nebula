@@ -29,22 +29,94 @@ const EMPTY_OVERVIEW: ClusterStatus = {
 
 type Page = 'dashboard' | 'models' | 'model-detail' | 'model-catalog' | 'model-library' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images' | 'templates'
 
+const PAGE_PATH: Record<Page, string> = {
+  dashboard: '/',
+  models: '/models',
+  'model-detail': '/models/detail',
+  'model-catalog': '/resources/model-catalog',
+  'model-library': '/resources/model-library',
+  nodes: '/infrastructure/nodes',
+  settings: '/system/settings',
+  inference: '/inference',
+  endpoints: '/endpoints',
+  audit: '/resources/audit',
+  images: '/infrastructure/images',
+  templates: '/infrastructure/templates',
+}
+
+const normalizePath = (pathname: string) => {
+  if (!pathname || pathname === '/') return '/'
+  return pathname.replace(/\/+$/, '')
+}
+
+const readRouteFromLocation = (): { page: Page; modelUid: string | null } => {
+  const path = normalizePath(window.location.pathname)
+  const params = new URLSearchParams(window.location.search)
+
+  if (path === '/models/detail') {
+    const modelUid = params.get('uid')
+    return modelUid ? { page: 'model-detail', modelUid } : { page: 'models', modelUid: null }
+  }
+
+  const byPath = (Object.entries(PAGE_PATH) as [Page, string][]).find(([, routePath]) => routePath === path)
+  if (byPath) return { page: byPath[0], modelUid: null }
+
+  return { page: 'dashboard', modelUid: null }
+}
+
 const fmtTime = (v: number) => (v ? new Date(v).toLocaleString() : 'n/a')
 
 const pct = (used: number, total: number) =>
   total > 0 ? Math.round((used / total) * 100) : 0
 
 function App() {
+  const initialRoute = readRouteFromLocation()
   const [token, setToken] = useState(() => localStorage.getItem('nebula_token') || '')
   const [overview, setOverview] = useState<ClusterStatus>(EMPTY_OVERVIEW)
   const [, setRequests] = useState<ModelRequest[]>([])
   const [, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [page, setPage] = useState<Page>('dashboard')
+  const [page, setPage] = useState<Page>(initialRoute.page)
   const [showLoadDialog, setShowLoadDialog] = useState(false)
-  const [selectedModelUid, setSelectedModelUid] = useState<string | null>(null)
+  const [selectedModelUid, setSelectedModelUid] = useState<string | null>(initialRoute.modelUid)
   const [metricsRaw, setMetricsRaw] = useState('')
   const [engineStats, setEngineStats] = useState<EndpointStats[]>([])
+
+  const navigateToPage = useCallback((nextPage: Page, options?: { modelUid?: string | null; replace?: boolean }) => {
+    const nextModelUid = options?.modelUid ?? null
+    const nextPath = PAGE_PATH[nextPage]
+    const nextUrl =
+      nextPage === 'model-detail' && nextModelUid
+        ? `${nextPath}?uid=${encodeURIComponent(nextModelUid)}`
+        : nextPath
+
+    setPage(nextPage)
+    setSelectedModelUid(nextPage === 'model-detail' ? nextModelUid : null)
+
+    const currentPath = normalizePath(window.location.pathname)
+    const currentQuery = window.location.search
+    const [nextUrlPath, nextUrlQuery = ''] = nextUrl.split('?')
+    const targetQuery = nextUrlQuery ? `?${nextUrlQuery}` : ''
+    const isSameRoute = currentPath === normalizePath(nextUrlPath) && currentQuery === targetQuery
+
+    if (!isSameRoute) {
+      if (options?.replace) {
+        window.history.replaceState(null, '', nextUrl)
+      } else {
+        window.history.pushState(null, '', nextUrl)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const onPopState = () => {
+      const route = readRouteFromLocation()
+      setPage(route.page)
+      setSelectedModelUid(route.modelUid)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
 
   const counts = useMemo(
     () => ({
@@ -162,7 +234,7 @@ function App() {
     <div className="flex min-h-screen w-full bg-background font-sans">
       <Sidebar
         page={page}
-        setPage={(p) => setPage(p)}
+        setPage={(p) => navigateToPage(p as Page)}
         clusterHealthy={!error && overview.nodes.length > 0}
       />
 
@@ -182,10 +254,9 @@ function App() {
             <ModelsView
               token={token}
               onOpenLoadDialog={() => setShowLoadDialog(true)}
-              onNavigate={(p) => setPage(p as Page)}
+              onNavigate={(p) => navigateToPage(p as Page)}
               onSelectModel={(uid) => {
-                setSelectedModelUid(uid)
-                setPage('model-detail')
+                navigateToPage('model-detail', { modelUid: uid })
               }}
             />
             <LoadModelDialog
@@ -205,8 +276,7 @@ function App() {
             modelUid={selectedModelUid}
             token={token}
             onBack={() => {
-              setSelectedModelUid(null)
-              setPage('models')
+              navigateToPage('models')
             }}
           />
         )}
@@ -246,10 +316,9 @@ function App() {
         {page === 'model-catalog' && (
           <ModelCatalogView
             token={token}
-            onOpenModels={() => setPage('model-library')}
+            onOpenModels={() => navigateToPage('model-library')}
             onSelectModel={(uid) => {
-              setSelectedModelUid(uid)
-              setPage('model-detail')
+              navigateToPage('model-detail', { modelUid: uid })
             }}
           />
         )}
@@ -257,8 +326,7 @@ function App() {
           <ModelLibraryView
             token={token}
             onOpenService={(uid) => {
-              setSelectedModelUid(uid)
-              setPage('model-detail')
+              navigateToPage('model-detail', { modelUid: uid })
             }}
           />
         )}

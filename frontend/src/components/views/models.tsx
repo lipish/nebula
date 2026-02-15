@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Plus, Trash2, Box, Play, Square, Loader2 } from "lucide-react"
+import { Plus, Trash2, Box, Play, Square, Loader2, ExternalLink, Copy, Check } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -36,6 +36,7 @@ export function ModelsView({
     const [error, setError] = useState<string | null>(null)
     const [acting, setActing] = useState<string | null>(null)
     const [filter, setFilter] = useState<AggregatedModelState | "all">("all")
+    const [copiedModelUid, setCopiedModelUid] = useState<string | null>(null)
 
     const refresh = useCallback(async () => {
         try {
@@ -60,6 +61,43 @@ export function ModelsView({
         try { await fn(); await refresh() } catch (err) {
             setError(err instanceof Error ? err.message : "Action failed")
         } finally { setActing(null) }
+    }
+
+    const copyModelName = async (uid: string, modelName: string) => {
+        const markCopied = () => {
+            setCopiedModelUid(uid)
+            setError(null)
+            setTimeout(() => setCopiedModelUid((current) => (current === uid ? null : current)), 1200)
+        }
+
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(modelName)
+                markCopied()
+                return
+            }
+        } catch {
+            // fallback below
+        }
+
+        try {
+            const textArea = document.createElement("textarea")
+            textArea.value = modelName
+            textArea.setAttribute("readonly", "")
+            textArea.style.position = "fixed"
+            textArea.style.opacity = "0"
+            textArea.style.pointerEvents = "none"
+            document.body.appendChild(textArea)
+            textArea.select()
+            textArea.setSelectionRange(0, textArea.value.length)
+            const copied = document.execCommand("copy")
+            document.body.removeChild(textArea)
+
+            if (!copied) throw new Error("execCommand copy failed")
+            markCopied()
+        } catch {
+            setError("Failed to copy model name")
+        }
     }
 
     const filtered = filter === "all" ? models : models.filter((m) => m.state === filter)
@@ -149,12 +187,27 @@ export function ModelsView({
                                 return (
                                     <TableRow
                                         key={model.model_uid}
-                                        className="group hover:bg-accent/20 transition-colors cursor-pointer"
-                                        onClick={() => onSelectModel?.(model.model_uid)}
+                                        className="group hover:bg-accent/20 transition-colors"
                                     >
                                         <TableCell className="py-5">
-                                            <div className="font-bold text-sm tracking-tight">{model.model_uid}</div>
-                                            <div className="text-[10px] font-mono text-muted-foreground truncate max-w-[220px] bg-accent/40 inline-block px-1.5 rounded mt-1.5">{model.model_name}</div>
+                                            <div className="font-bold text-sm tracking-tight inline-flex items-center gap-1">
+                                                {model.model_uid}
+                                            </div>
+                                            <div className="mt-1.5 flex items-center gap-1.5">
+                                                <span className="text-[10px] font-mono text-muted-foreground truncate max-w-[220px] bg-accent/40 inline-block px-1.5 rounded select-text" title={model.model_name}>
+                                                    {model.model_name}
+                                                </span>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
+                                                    onClick={() => copyModelName(model.model_uid, model.model_name)}
+                                                    aria-label={`Copy model name ${model.model_name}`}
+                                                >
+                                                    {copiedModelUid === model.model_uid ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+                                                </Button>
+                                            </div>
                                         </TableCell>
                                         <TableCell>
                                             <Badge className={cn("text-[11px] font-bold", sb.cls)}>{sb.label}</Badge>
@@ -186,14 +239,21 @@ export function ModelsView({
                                                 )}
                                                 {model.state === "running" && (
                                                     <Button
-                                                        variant="ghost" size="sm"
-                                                        className="text-muted-foreground font-bold text-xs rounded-xl h-8"
+                                                        variant="outline" size="sm"
+                                                        className="text-destructive border-destructive/30 hover:bg-destructive hover:text-destructive-foreground font-bold text-xs rounded-xl h-8"
                                                         onClick={() => act(model.model_uid, () => v2.stopModel(model.model_uid, token))}
                                                         disabled={isActing}
                                                     >
-                                                        <Square className="h-3.5 w-3.5 mr-1" /> Stop
+                                                        <Square className="h-3.5 w-3.5 mr-1" /> Stop Service
                                                     </Button>
                                                 )}
+                                                <Button
+                                                    variant="ghost" size="sm"
+                                                    className="font-bold text-xs rounded-xl h-8"
+                                                    onClick={() => onSelectModel?.(model.model_uid)}
+                                                >
+                                                    <ExternalLink className="h-3.5 w-3.5 mr-1" /> Details
+                                                </Button>
                                                 {(model.state === "stopped" || model.state === "failed") && (
                                                     <Button
                                                         variant="ghost" size="sm"
