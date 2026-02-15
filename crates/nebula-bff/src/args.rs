@@ -21,6 +21,14 @@ pub struct Args {
     #[arg(long, env = "NEBULA_ROUTER_URL", default_value = "http://127.0.0.1:18081")]
     pub router_url: String,
 
+    /// PostgreSQL connection URL for user auth/profile persistence.
+    #[arg(long, env = "BFF_DATABASE_URL", default_value = "postgresql://postgres:postgres@127.0.0.1:5432/nebula")]
+    pub database_url: String,
+
+    /// Session TTL in hours for login tokens.
+    #[arg(long, env = "BFF_SESSION_TTL_HOURS", default_value_t = 24)]
+    pub session_ttl_hours: i64,
+
     /// xtrace (nebula-observe) base URL for observability queries.
     #[arg(long, env = "XTRACE_URL", default_value = "http://127.0.0.1:8742")]
     pub xtrace_url: String,

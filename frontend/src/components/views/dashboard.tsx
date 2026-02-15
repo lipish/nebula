@@ -30,14 +30,6 @@ interface MetricQueryResult {
     points: MetricPoint[]
 }
 
-function greeting(): string {
-    const h = new Date().getHours()
-    if (h < 6) return "Good Night"
-    if (h < 12) return "Good Morning"
-    if (h < 18) return "Good Afternoon"
-    return "Good Evening"
-}
-
 export function DashboardView({ overview, counts, gpuStats, pct, engineStats, token }: DashboardProps) {
     const gpuUsagePct = gpuStats.count > 0 ? pct(gpuStats.used, gpuStats.total) : 0
 
@@ -193,11 +185,8 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
         <div className="space-y-5">
             {/* Header */}
             <div>
-                <h2 className="text-2xl font-bold text-foreground mb-1">Overview</h2>
-                <div className="mt-6 mb-2">
-                    <h3 className="text-xl font-bold text-foreground">{greeting()}</h3>
-                    <p className="text-sm text-muted-foreground mt-1">Here's an overview of your cluster health and active models</p>
-                </div>
+                <h2 className="text-2xl font-bold text-foreground">Overview</h2>
+                <p className="text-sm text-muted-foreground mt-1">Here's an overview of your cluster health and active models</p>
             </div>
 
             {/* Disk alert banners */}

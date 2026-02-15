@@ -29,6 +29,7 @@ NODE_ID="${NODE_ID:-node_gpu0}"
 XTRACE_URL="${XTRACE_URL:-http://127.0.0.1:8742}"
 XTRACE_TOKEN="${XTRACE_TOKEN:-}"
 XTRACE_AUTH_MODE="${XTRACE_AUTH_MODE:-internal}"
+BFF_DATABASE_URL="${BFF_DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:5432/nebula}"
 
 # Set START_BFF=1 to run nebula-bff locally (recommended for frontend /api + /api/v2).
 # Example: START_BFF=1 XTRACE_TOKEN=nebula-xtrace-token-2026 ./bin/nebula-up.sh
@@ -54,6 +55,7 @@ echo "Logs will be written to $LOG_DIR"
 echo "env file: $ENV_FILE"
 echo "xtrace url: $XTRACE_URL"
 echo "xtrace auth mode: $XTRACE_AUTH_MODE"
+echo "bff database: $BFF_DATABASE_URL"
 if [ -z "$XTRACE_TOKEN" ]; then
     echo "xtrace token: (empty)"
 else
@@ -89,6 +91,7 @@ if [ "$START_BFF" = "1" ]; then
         --listen-addr "0.0.0.0:$BFF_PORT" \
         --etcd-endpoint "$ETCD_ENDPOINT" \
         --router-url "http://127.0.0.1:$ROUTER_PORT" \
+        --database-url "$BFF_DATABASE_URL" \
         --xtrace-url "$XTRACE_URL" \
         --xtrace-token "$XTRACE_TOKEN" \
         --xtrace-auth-mode "$XTRACE_AUTH_MODE" > "$LOG_DIR/bff.log" 2>&1 &

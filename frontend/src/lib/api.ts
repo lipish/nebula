@@ -101,11 +101,49 @@ export async function apiDelete<T>(path: string, token?: string): Promise<T> {
 // we simply prefix paths with /v2 so the final URL becomes /api/v2/...
 
 import type {
+  AuthUser,
+  CreateUserPayload,
+  ManagedUser,
   ModelView,
   ModelDetailView,
   ModelTemplate,
   DiskAlert,
+  LoginResponse,
+  UpdateUserPayload,
+  UserSettings,
 } from '@/lib/types'
+
+export const authApi = {
+  login: (username: string, password: string) =>
+    apiPost<LoginResponse, { username: string; password: string }>('/auth/login', { username, password }),
+
+  logout: (token?: string) =>
+    apiPost<{ ok: boolean }, Record<string, never>>('/auth/logout', {}, token),
+
+  me: (token?: string) =>
+    apiGet<AuthUser>('/auth/me', token),
+
+  updateProfile: (body: { display_name?: string; email?: string }, token?: string) =>
+    apiPut<{ ok: boolean }, { display_name?: string; email?: string }>('/auth/profile', body, token),
+
+  getSettings: (token?: string) =>
+    apiGet<UserSettings>('/auth/settings', token),
+
+  updateSettings: (body: Partial<UserSettings>, token?: string) =>
+    apiPut<{ ok: boolean }, Partial<UserSettings>>('/auth/settings', body, token),
+
+  listUsers: (token?: string) =>
+    apiGet<ManagedUser[]>('/auth/users', token),
+
+  createUser: (body: CreateUserPayload, token?: string) =>
+    apiPost<{ ok: boolean; id: string }, CreateUserPayload>('/auth/users', body, token),
+
+  updateUser: (id: string, body: UpdateUserPayload, token?: string) =>
+    apiPut<{ ok: boolean }, UpdateUserPayload>(`/auth/users/${id}`, body, token),
+
+  deleteUser: (id: string, token?: string) =>
+    apiDelete<{ ok: boolean }>(`/auth/users/${id}`, token),
+}
 
 export const v2 = {
   listModels: (token?: string) =>

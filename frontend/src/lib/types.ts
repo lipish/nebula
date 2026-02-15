@@ -263,3 +263,42 @@ export interface DiskAlert {
   available_bytes: number
   created_at_ms: number
 }
+
+export interface AuthUser {
+  id: string
+  username: string
+  role: 'admin' | 'operator' | 'viewer'
+  display_name?: string | null
+  email?: string | null
+}
+
+export interface ManagedUser extends AuthUser {
+  is_active: boolean
+}
+
+export interface LoginResponse {
+  token: string
+  expires_at: string
+  user: AuthUser
+}
+
+export interface UserSettings {
+  in_app_alerts: boolean
+  email_alerts: boolean
+}
+
+export interface CreateUserPayload {
+  username: string
+  password: string
+  role: 'admin' | 'operator' | 'viewer'
+  display_name?: string
+  email?: string
+}
+
+export interface UpdateUserPayload {
+  role?: 'admin' | 'operator' | 'viewer'
+  display_name?: string
+  email?: string
+  is_active?: boolean
+  password?: string
+}

@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { apiDelete, apiGet, apiPost } from '@/lib/api'
-import type { ClusterStatus, EndpointStats, ModelLoadRequest, ModelRequest } from '@/lib/types'
+import { Bell, Search, User, Settings, LogOut } from 'lucide-react'
+import { apiDelete, apiGet, apiPost, authApi } from '@/lib/api'
+import type { AuthUser, ClusterStatus, EndpointStats, ModelLoadRequest, ModelRequest } from '@/lib/types'
 
 // Components
 import Sidebar from '@/components/Sidebar'
 import { LoadModelDialog } from '@/components/LoadModelDialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 // Views
 import { DashboardView } from '@/components/views/dashboard'
@@ -19,6 +30,9 @@ import { ImagesView } from '@/components/views/images'
 import { TemplatesView } from '@/components/views/templates'
 import { ModelCatalogView } from '@/components/views/model-catalog'
 import { ModelLibraryView } from '@/components/views/model-library'
+import { UserProfileView } from '@/components/views/user-profile'
+import { AccountSettingsView } from '@/components/views/account-settings'
+import { LoginView } from '@/components/views/login'
 
 const EMPTY_OVERVIEW: ClusterStatus = {
   nodes: [],
@@ -27,7 +41,7 @@ const EMPTY_OVERVIEW: ClusterStatus = {
   model_requests: [],
 }
 
-type Page = 'dashboard' | 'models' | 'model-detail' | 'model-catalog' | 'model-library' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images' | 'templates'
+type Page = 'dashboard' | 'models' | 'model-detail' | 'model-catalog' | 'model-library' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images' | 'templates' | 'profile' | 'account-settings'
 
 const PAGE_PATH: Record<Page, string> = {
   dashboard: '/',
@@ -42,6 +56,8 @@ const PAGE_PATH: Record<Page, string> = {
   audit: '/resources/audit',
   images: '/infrastructure/images',
   templates: '/infrastructure/templates',
+  profile: '/system/profile',
+  'account-settings': '/system/account-settings',
 }
 
 const normalizePath = (pathname: string) => {
@@ -72,6 +88,8 @@ const pct = (used: number, total: number) =>
 function App() {
   const initialRoute = readRouteFromLocation()
   const [token, setToken] = useState(() => localStorage.getItem('nebula_token') || '')
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
+  const [authReady, setAuthReady] = useState(false)
   const [overview, setOverview] = useState<ClusterStatus>(EMPTY_OVERVIEW)
   const [, setRequests] = useState<ModelRequest[]>([])
   const [, setLoading] = useState(false)
@@ -129,6 +147,7 @@ function App() {
   )
 
   const refreshAll = useCallback(async () => {
+    if (!token) return
     setLoading(true)
     setError(null)
     try {
@@ -159,12 +178,17 @@ function App() {
     }
   }, [token])
 
-  useEffect(() => { refreshAll() }, [refreshAll])
+  useEffect(() => {
+    if (token) {
+      refreshAll()
+    }
+  }, [refreshAll, token])
 
   useEffect(() => {
+    if (!token) return
     const id = setInterval(refreshAll, 10000)
     return () => clearInterval(id)
-  }, [refreshAll])
+  }, [refreshAll, token])
 
   const handleLoadModel = useCallback(async (form: ModelLoadRequest, gpu: { nodeId: string; gpuIndices: number[] }) => {
     setError(null)
@@ -230,6 +254,90 @@ function App() {
     return { total, used, count }
   }, [overview.nodes])
 
+  const alertCount = useMemo(() => {
+    const endpointAlerts = overview.endpoints.filter((ep) => {
+      const status = (ep.status || '').toLowerCase()
+      if (!status) return false
+      return !status.includes('ready') && !status.includes('running')
+    }).length
+    return endpointAlerts + (error ? 1 : 0)
+  }, [overview.endpoints, error])
+
+  const handleLogout = useCallback(async () => {
+    try {
+      if (token) await authApi.logout(token)
+    } catch {
+      // ignore logout API errors and clear local session anyway
+    }
+    setToken('')
+    setCurrentUser(null)
+    localStorage.removeItem('nebula_token')
+    navigateToPage('dashboard', { replace: true })
+  }, [navigateToPage, token])
+
+  const refreshCurrentUser = useCallback(async () => {
+    if (!token) {
+      setCurrentUser(null)
+      return
+    }
+    const me = await authApi.me(token)
+    setCurrentUser(me)
+  }, [token])
+
+  useEffect(() => {
+    let cancelled = false
+    const verifySession = async () => {
+      if (!token) {
+        if (!cancelled) {
+          setCurrentUser(null)
+          setAuthReady(true)
+        }
+        return
+      }
+
+      try {
+        const me = await authApi.me(token)
+        if (!cancelled) {
+          setCurrentUser(me)
+          setAuthReady(true)
+        }
+      } catch {
+        if (!cancelled) {
+          setToken('')
+          setCurrentUser(null)
+          localStorage.removeItem('nebula_token')
+          setAuthReady(true)
+        }
+      }
+    }
+    void verifySession()
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen w-full bg-background flex items-center justify-center text-sm text-muted-foreground">
+        Loading session...
+      </div>
+    )
+  }
+
+  if (!token || !currentUser) {
+    return (
+      <LoginView
+        onLoginSuccess={(nextToken, user) => {
+          setToken(nextToken)
+          setCurrentUser(user)
+          localStorage.setItem('nebula_token', nextToken)
+          setAuthReady(true)
+          navigateToPage('dashboard', { replace: true })
+        }}
+      />
+    )
+  }
+
   return (
     <div className="flex min-h-screen w-full bg-background font-sans">
       <Sidebar
@@ -238,7 +346,46 @@ function App() {
         clusterHealthy={!error && overview.nodes.length > 0}
       />
 
-      <main className="ml-64 p-8 flex-1 min-w-0">
+        <main className="flex-1 min-w-0 p-4 lg:p-5 space-y-3 bg-background">
+          <header className="rounded-2xl bg-background px-1 py-1 flex items-center justify-end gap-1.5">
+              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg bg-card relative">
+                <Bell className="h-3.5 w-3.5 text-muted-foreground" />
+                {alertCount > 0 && (
+                  <span className="absolute -right-1 -top-1 h-4 min-w-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] leading-4">
+                    {alertCount > 99 ? '99+' : alertCount}
+                  </span>
+                )}
+              </Button>
+              <div className="relative w-64">
+                <Search className="h-3.5 w-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                <Input
+                  placeholder="Search for models, nodes..."
+                  className="h-8 rounded-lg pl-8 border-border/60 bg-card"
+                />
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg bg-card">
+                    <User className="h-3.5 w-3.5 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuLabel>Account</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => navigateToPage('profile')}>
+                    <User className="h-4 w-4" /> Edit Profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigateToPage('account-settings')}>
+                    <Settings className="h-4 w-4" /> Account Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={handleLogout}>
+                    <LogOut className="h-4 w-4" /> Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+          </header>
+
         {page === 'dashboard' && (
           <DashboardView
             overview={overview}
@@ -293,9 +440,18 @@ function App() {
             token={token}
             setToken={setToken}
             onSaveToken={() => {
-              localStorage.setItem('nebula_token', token)
               refreshAll()
             }}
+          />
+        )}
+        {page === 'profile' && (
+          <UserProfileView token={token} user={currentUser} onProfileUpdated={refreshCurrentUser} />
+        )}
+        {page === 'account-settings' && (
+          <AccountSettingsView
+            token={token}
+            user={currentUser}
+            onOpenSecuritySettings={() => navigateToPage('settings')}
           />
         )}
         {page === 'inference' && (

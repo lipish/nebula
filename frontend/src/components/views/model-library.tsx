@@ -133,7 +133,6 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
         <div className="px-6 py-5 border-b border-border bg-accent/30 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-foreground tracking-tight">Downloaded Assets</h3>
-            <p className="text-xs font-medium text-muted-foreground">Delete or relocate models, and jump to service status</p>
           </div>
           <Badge variant="outline" className="font-bold border-primary/20 text-primary uppercase h-6">
             {models.length} Models

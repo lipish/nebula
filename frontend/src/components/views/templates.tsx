@@ -114,9 +114,6 @@ export function TemplatesView({ token }: TemplatesViewProps) {
             <h3 className="text-lg font-bold text-foreground tracking-tight">
               Available Templates
             </h3>
-            <p className="text-xs font-medium text-muted-foreground">
-              Deploy models from pre-configured templates
-            </p>
           </div>
           <Badge
             variant="outline"

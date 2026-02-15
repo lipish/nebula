@@ -247,7 +247,6 @@ export function ModelCatalogView({ token, onSelectModel, onOpenModels }: ModelCa
       <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
         <div className="px-6 py-5 border-b border-border bg-accent/30">
           <h3 className="text-lg font-bold text-foreground tracking-tight">Browse & Download</h3>
-          <p className="text-xs font-medium text-muted-foreground">Search and import with one click</p>
         </div>
         <div className="p-6 grid grid-cols-1 md:grid-cols-12 gap-3">
           <div className="space-y-2">

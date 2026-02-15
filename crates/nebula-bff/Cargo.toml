@@ -19,6 +19,9 @@ uuid.workspace = true
 
 chrono.workspace = true
 xtrace-client.workspace = true
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
+argon2 = "0.5"
+rand = "0.8"
 
 nebula-meta = { path = "../nebula-meta" }
 nebula-common = { path = "../nebula-common" }

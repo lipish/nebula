@@ -59,14 +59,14 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
     }, [page, infrastructureIds, resourceIds, systemIds]);
 
     return (
-        <aside className="fixed left-0 top-0 h-screen w-64 bg-card border-r border-border flex flex-col">
-            <div className="px-6 py-6 flex items-center gap-2.5">
+        <aside className="w-64 shrink-0 bg-card/95 border-r border-border/70 flex flex-col">
+            <div className="px-5 py-5 flex items-center gap-2.5 border-b border-border/60">
                 <Diamond className="h-5 w-5 text-foreground" />
                 <h1 className="text-xl font-bold text-foreground tracking-tight">Nebula</h1>
             </div>
 
-            <nav className="flex-1 px-4 overflow-y-auto">
-                <div className="flex items-center justify-between px-3 mb-2">
+            <nav className="flex-1 px-3 py-3 overflow-y-auto">
+                <div className="flex items-center justify-between px-3 mb-1">
                     <p className="text-xs font-medium text-muted-foreground">Workbench</p>
                     <button onClick={() => setMenuOpen(!menuOpen)} className="text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors">
                         {menuOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -79,7 +79,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                                 key={item.label}
                                 onClick={item.id ? () => setPage(item.id) : undefined}
                                 className={cn(
-                                    "flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                                    "flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                                     item.id && page === item.id
                                         ? "bg-sidebar-accent text-sidebar-accent-foreground"
                                         : "text-sidebar-foreground hover:bg-sidebar-accent/50"
@@ -92,7 +92,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                     </div>
                 )}
 
-                <div className="flex items-center justify-between px-3 mt-6 mb-2">
+                <div className="flex items-center justify-between px-3 mt-5 mb-1">
                     <p className="text-xs font-medium text-muted-foreground">Infrastructure</p>
                     <button onClick={() => setInfraOpen(!infraOpen)} className="text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors">
                         {infraOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -105,7 +105,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                                 key={item.label}
                                 onClick={item.id ? () => setPage(item.id) : undefined}
                                 className={cn(
-                                    "flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                                    "flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                                     item.id && page === item.id
                                         ? "bg-sidebar-accent text-sidebar-accent-foreground"
                                         : "text-sidebar-foreground hover:bg-sidebar-accent/50"
@@ -118,7 +118,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                     </div>
                 )}
 
-                <div className="flex items-center justify-between px-3 mt-6 mb-2">
+                <div className="flex items-center justify-between px-3 mt-5 mb-1">
                     <p className="text-xs font-medium text-muted-foreground">Resources</p>
                     <button onClick={() => setResourcesOpen(!resourcesOpen)} className="text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors">
                         {resourcesOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -131,7 +131,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                                 key={item.label}
                                 onClick={item.id ? () => setPage(item.id) : undefined}
                                 className={cn(
-                                    "flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                                    "flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                                     item.id && page === item.id
                                         ? "bg-sidebar-accent text-sidebar-accent-foreground"
                                         : "text-sidebar-foreground hover:bg-sidebar-accent/50"
@@ -144,7 +144,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                     </div>
                 )}
 
-                <div className="flex items-center justify-between px-3 mt-6 mb-2">
+                <div className="flex items-center justify-between px-3 mt-5 mb-1">
                     <p className="text-xs font-medium text-muted-foreground">System</p>
                     <button onClick={() => setSystemOpen(!systemOpen)} className="text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors">
                         {systemOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -157,7 +157,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                                 key={item.label}
                                 onClick={item.id ? () => setPage(item.id) : undefined}
                                 className={cn(
-                                    "flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                                    "flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                                     item.id && page === item.id
                                         ? "bg-sidebar-accent text-sidebar-accent-foreground"
                                         : "text-sidebar-foreground hover:bg-sidebar-accent/50"
@@ -171,8 +171,8 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
                 )}
             </nav>
 
-            <div className="px-5 pb-5">
-                <p className="text-xs text-muted-foreground">v0.1.0</p>
+            <div className="px-4 pb-4 pt-3 border-t border-border/60">
+                <p className="text-[11px] text-muted-foreground">v0.1.0</p>
             </div>
         </aside>
     );

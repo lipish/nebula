@@ -1,7 +1,5 @@
 import { ShieldCheck, KeyRound } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 
 interface SettingsProps {
@@ -10,7 +8,7 @@ interface SettingsProps {
     onSaveToken: () => void
 }
 
-export function SettingsView({ token, setToken, onSaveToken }: SettingsProps) {
+export function SettingsView({ token: _token, setToken: _setToken, onSaveToken }: SettingsProps) {
     return (
         <div className="max-w-2xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div>
@@ -26,45 +24,28 @@ export function SettingsView({ token, setToken, onSaveToken }: SettingsProps) {
                         </div>
                         <div>
                             <h3 className="text-lg font-bold text-foreground tracking-tight">Authentication</h3>
-                            <p className="text-xs font-medium text-muted-foreground">Manage your access credentials</p>
+                            <p className="text-xs font-medium text-muted-foreground">Managed by backend PostgreSQL auth service</p>
                         </div>
                     </div>
                     <Badge variant="outline" className="border-border text-muted-foreground font-bold text-[9px] uppercase tracking-widest">
-                        Local Storage
+                        Server Managed
                     </Badge>
                 </div>
 
                 <div className="space-y-6">
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                            <Label htmlFor="token" className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                                BFF API Bearer Token
-                            </Label>
-                            <div className="flex h-2 w-2 rounded-full bg-success" />
+                    <div className="rounded-xl border border-border px-4 py-3 bg-accent/20">
+                        <div className="flex items-center gap-2 mb-1">
+                            <KeyRound className="h-4 w-4 text-primary" />
+                            <p className="text-sm font-semibold text-foreground">Session Authentication</p>
                         </div>
-                        <div className="relative group">
-                            <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-primary">
-                                <KeyRound className="h-4 w-4" />
-                            </div>
-                            <Input
-                                id="token"
-                                type="password"
-                                placeholder="Enter your security token..."
-                                className="pl-10 h-12 rounded-xl border-border bg-accent/20 focus:bg-background transition-all font-mono"
-                                value={token}
-                                onChange={(e) => setToken(e.target.value)}
-                            />
-                        </div>
-                        <p className="text-[10px] font-medium text-muted-foreground/70 bg-accent/30 px-3 py-2 rounded-lg">
-                            <span className="font-bold text-primary">Security Note:</span> This token is stored locally in your browser's encrypted storage and sent with every API request to authorize communication with the Nebula Backend.
-                        </p>
+                        <p className="text-xs text-muted-foreground">Current session token is issued by backend login API and validated against PostgreSQL sessions.</p>
                     </div>
 
                     <Button
                         onClick={onSaveToken}
                         className="w-full bg-primary font-bold rounded-xl h-11 shadow-sm hover:shadow-md active:scale-[0.99] transition-all"
                     >
-                        Apply Security Changes
+                        Refresh Protected Data
                     </Button>
                 </div>
             </div>

@@ -172,9 +172,6 @@ export function ImagesView({ token }: ImagesViewProps) {
             <h3 className="text-lg font-bold text-foreground tracking-tight">
               Registered Images
             </h3>
-            <p className="text-xs font-medium text-muted-foreground">
-              Engine images available for deployment
-            </p>
           </div>
           <Badge
             variant="outline"

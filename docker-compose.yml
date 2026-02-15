@@ -1,6 +1,22 @@
 version: "3.9"
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nebula
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nebula"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   etcd:
     image: quay.io/coreos/etcd:v3.5.0
     command: >-
@@ -40,6 +56,7 @@ services:
       NEBULA_ROUTER_URL: http://router:18081
       NEBULA_BFF_ADDR: 0.0.0.0:18090
       NEBULA_AUTH_TOKENS: "devtoken:admin,viewtoken:viewer"
+      BFF_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/nebula
       XTRACE_URL: ${XTRACE_URL:-http://host.docker.internal:8742}
       XTRACE_AUTH_MODE: ${XTRACE_AUTH_MODE:-internal}
       XTRACE_TOKEN: ${XTRACE_TOKEN:-}
@@ -47,6 +64,8 @@ services:
       - "18090:18090"
     depends_on:
       etcd:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   router:
@@ -102,3 +121,6 @@ services:
 
 # NOTE: nebula-node and vLLM are not included in compose because they require
 # GPU access and model files. Run them on GPU hosts directly.
+
+volumes:
+  postgres_data:
