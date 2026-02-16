@@ -23,6 +23,29 @@ pub struct Metrics {
     pub auth_invalid: AtomicU64,
     pub auth_forbidden: AtomicU64,
     pub auth_rate_limited: AtomicU64,
+    pub request_too_large_total: AtomicU64,
+    pub upstream_error_connect_total: AtomicU64,
+    pub upstream_error_timeout_total: AtomicU64,
+    pub upstream_error_other_total: AtomicU64,
+}
+
+impl Metrics {
+    pub fn record_upstream_error(&self, kind: &str) {
+        match kind {
+            "connect" => {
+                self.upstream_error_connect_total
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "timeout" => {
+                self.upstream_error_timeout_total
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {
+                self.upstream_error_other_total
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
 }
 
 pub fn render_metrics(metrics: &Metrics) -> String {
@@ -81,6 +104,25 @@ pub fn render_metrics(metrics: &Metrics) -> String {
          # TYPE nebula_gateway_auth_rate_limited counter\n\
          nebula_gateway_auth_rate_limited {}\n",
         metrics.auth_rate_limited.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_gateway_request_too_large_total Requests rejected due to max body size.\n\
+         # TYPE nebula_gateway_request_too_large_total counter\n\
+         nebula_gateway_request_too_large_total {}\n",
+        metrics.request_too_large_total.load(Ordering::Relaxed),
+    ));
+    body.push_str("# HELP nebula_gateway_upstream_error_total Upstream proxy errors by kind.\n# TYPE nebula_gateway_upstream_error_total counter\n");
+    body.push_str(&format!(
+        "nebula_gateway_upstream_error_total{{kind=\"connect\"}} {}\n",
+        metrics.upstream_error_connect_total.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "nebula_gateway_upstream_error_total{{kind=\"timeout\"}} {}\n",
+        metrics.upstream_error_timeout_total.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "nebula_gateway_upstream_error_total{{kind=\"other\"}} {}\n",
+        metrics.upstream_error_other_total.load(Ordering::Relaxed),
     ));
 
     body

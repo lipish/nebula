@@ -13,6 +13,19 @@ use strategy::{Candidate, LeastPending, RoutingStrategy};
 /// admission control kicks in and returns Overloaded.
 const KV_CACHE_OVERLOAD_THRESHOLD: f64 = 0.95;
 
+#[derive(Debug, Clone, Default)]
+struct EndpointCircuitState {
+    consecutive_failures: u32,
+    open_until_ms: u64,
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis() as u64
+}
+
 #[derive(Debug, Clone)]
 pub enum RouteError {
     /// No ready endpoint found for the requested model.
@@ -44,7 +57,12 @@ pub struct Router {
     xtrace_stale_total: AtomicU64,
     xtrace_truncated_total: AtomicU64,
     route_stale_stats_dropped_total: AtomicU64,
+    route_circuit_skipped_total: AtomicU64,
+    circuit_open_total: AtomicU64,
     stats_max_age_ms: u64,
+    circuit_failure_threshold: u32,
+    circuit_open_ms: u64,
+    endpoint_circuit: DashMap<(String, u32), EndpointCircuitState>,
 }
 
 impl std::fmt::Debug for Router {
@@ -71,6 +89,14 @@ impl Router {
                     .and_then(|v| v.parse().ok())
             })
             .unwrap_or(60_000);
+        let circuit_failure_threshold = std::env::var("NEBULA_ROUTE_CIRCUIT_FAILURE_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(3);
+        let circuit_open_ms = std::env::var("NEBULA_ROUTE_CIRCUIT_OPEN_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30_000);
         Arc::new(Self {
             endpoints: DashMap::new(),
             stats: DashMap::new(),
@@ -83,7 +109,12 @@ impl Router {
             xtrace_stale_total: AtomicU64::new(0),
             xtrace_truncated_total: AtomicU64::new(0),
             route_stale_stats_dropped_total: AtomicU64::new(0),
+            route_circuit_skipped_total: AtomicU64::new(0),
+            circuit_open_total: AtomicU64::new(0),
             stats_max_age_ms,
+            circuit_failure_threshold,
+            circuit_open_ms,
+            endpoint_circuit: DashMap::new(),
         })
     }
 
@@ -151,6 +182,56 @@ impl Router {
 
     pub fn route_stale_stats_dropped_total(&self) -> u64 {
         self.route_stale_stats_dropped_total.load(Ordering::Relaxed)
+    }
+
+    pub fn route_circuit_skipped_total(&self) -> u64 {
+        self.route_circuit_skipped_total.load(Ordering::Relaxed)
+    }
+
+    pub fn circuit_open_total(&self) -> u64 {
+        self.circuit_open_total.load(Ordering::Relaxed)
+    }
+
+    pub fn record_endpoint_success(&self, model_uid: &str, replica_id: u32) {
+        self.endpoint_circuit
+            .remove(&(model_uid.to_string(), replica_id));
+    }
+
+    pub fn record_endpoint_failure(&self, model_uid: &str, replica_id: u32) {
+        let key = (model_uid.to_string(), replica_id);
+        let now = now_ms();
+        let mut entry = self
+            .endpoint_circuit
+            .entry(key)
+            .or_insert_with(EndpointCircuitState::default);
+
+        if entry.open_until_ms > now {
+            return;
+        }
+
+        entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
+        if entry.consecutive_failures >= self.circuit_failure_threshold {
+            entry.consecutive_failures = 0;
+            entry.open_until_ms = now.saturating_add(self.circuit_open_ms);
+            self.circuit_open_total.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn is_endpoint_circuit_open(&self, model_uid: &str, replica_id: u32) -> bool {
+        let now = now_ms();
+        if let Some(entry) = self
+            .endpoint_circuit
+            .get(&(model_uid.to_string(), replica_id))
+        {
+            let open = entry.open_until_ms > now;
+            if !open {
+                drop(entry);
+                self.endpoint_circuit
+                    .remove(&(model_uid.to_string(), replica_id));
+            }
+            return open;
+        }
+        false
     }
 
     pub fn clear_session_affinity(&self, session_id: &str) {
@@ -223,34 +304,148 @@ impl Router {
         Some(stats)
     }
 
-    /// Check if all endpoints for a model are overloaded based on KV cache usage.
-    fn check_overloaded(&self, stats_snapshot: &[Option<EndpointStats>]) -> bool {
-        // Need at least one endpoint with KV cache data to make a judgment
-        let mut has_kv_data = false;
-        let mut all_overloaded = true;
-
-        for s in stats_snapshot.iter().flatten() {
-            if let (Some(used), Some(free)) = (s.kv_cache_used_bytes, s.kv_cache_free_bytes) {
-                has_kv_data = true;
-                let total = used + free;
-                if total > 0 {
-                    let usage = used as f64 / total as f64;
-                    if usage < KV_CACHE_OVERLOAD_THRESHOLD {
-                        all_overloaded = false;
-                        break;
+    fn route_internal(
+        &self,
+        ctx: &ExecutionContext,
+        model_uid: &str,
+        plan_version: Option<u64>,
+        exclude: Option<(&str, u32)>,
+    ) -> Result<EndpointInfo, RouteError> {
+        // Session affinity check
+        if let Some(session_id) = ctx.session_id.as_deref() {
+            if let Some(aff) = self.session_affinity.get(session_id) {
+                let (aff_model_uid, aff_replica_id) = aff.value();
+                if aff_model_uid == model_uid {
+                    let excluded = exclude
+                        .map(|(m, r)| m == aff_model_uid.as_str() && r == *aff_replica_id)
+                        .unwrap_or(false);
+                    if excluded {
+                        // Retry path explicitly excludes this sticky endpoint.
+                    } else if let Some(ep) = self
+                        .endpoints
+                        .get(&(aff_model_uid.clone(), *aff_replica_id))
+                        .map(|v| v.value().clone())
+                    {
+                        let plan_ok = plan_version
+                            .map(|v| ep.plan_version == v)
+                            .unwrap_or(true);
+                        if ep.status == EndpointStatus::Ready && plan_ok {
+                            return Ok(ep);
+                        }
                     }
-                } else {
-                    all_overloaded = false;
-                    break;
                 }
-            } else {
-                // No KV data for this endpoint — can't confirm overload
-                all_overloaded = false;
-                break;
             }
         }
 
-        has_kv_data && all_overloaded
+        // Build candidate list: filter by model_uid, Ready, optional plan_version and optional exclude
+        let filtered: Vec<EndpointInfo> = self
+            .endpoints
+            .iter()
+            .filter(|e| {
+                let ep = e.value();
+                if ep.model_uid != model_uid || ep.status != EndpointStatus::Ready {
+                    return false;
+                }
+                if self.is_endpoint_circuit_open(&ep.model_uid, ep.replica_id) {
+                    self.route_circuit_skipped_total
+                        .fetch_add(1, Ordering::Relaxed);
+                    return false;
+                }
+                if let Some(required_plan_version) = plan_version {
+                    if ep.plan_version != required_plan_version {
+                        return false;
+                    }
+                }
+                if let Some((exclude_model_uid, exclude_replica_id)) = exclude {
+                    if ep.model_uid == exclude_model_uid && ep.replica_id == exclude_replica_id {
+                        return false;
+                    }
+                }
+                true
+            })
+            .map(|e| e.value().clone())
+            .collect();
+
+        if filtered.is_empty() {
+            return Err(RouteError::NoEndpoint);
+        }
+
+        let stats_snapshot: Vec<Option<EndpointStats>> = filtered
+            .iter()
+            .map(|ep| self.get_fresh_stats(&ep.model_uid, ep.replica_id))
+            .collect();
+
+        let mut candidates_data: Vec<(EndpointInfo, Option<EndpointStats>)> = filtered
+            .into_iter()
+            .zip(stats_snapshot)
+            .collect();
+
+        // Stats-missing degradation: when any fresh stats exist, deprioritize stale/missing stats
+        // by dropping missing-stats candidates from this routing decision.
+        if candidates_data.iter().any(|(_, s)| s.is_some()) {
+            let with_stats: Vec<(EndpointInfo, Option<EndpointStats>)> = candidates_data
+                .iter()
+                .filter(|(_, s)| s.is_some())
+                .map(|(ep, s)| (ep.clone(), s.clone()))
+                .collect();
+            if !with_stats.is_empty() {
+                candidates_data = with_stats;
+            }
+        }
+
+        // Candidate reduction: filter out confirmed overloaded endpoints first.
+        let has_kv_data = candidates_data.iter().any(|(_, s)| {
+            s.as_ref()
+                .map(|st| st.kv_cache_used_bytes.is_some() && st.kv_cache_free_bytes.is_some())
+                .unwrap_or(false)
+        });
+
+        if has_kv_data {
+            let non_overloaded: Vec<(EndpointInfo, Option<EndpointStats>)> = candidates_data
+                .into_iter()
+                .filter(|(_, s)| {
+                    if let Some(st) = s {
+                        if let (Some(used), Some(free)) =
+                            (st.kv_cache_used_bytes, st.kv_cache_free_bytes)
+                        {
+                            let total = used.saturating_add(free);
+                            if total == 0 {
+                                return false;
+                            }
+                            let usage = used as f64 / total as f64;
+                            return usage < KV_CACHE_OVERLOAD_THRESHOLD;
+                        }
+                    }
+                    true
+                })
+                .collect();
+
+            if non_overloaded.is_empty() {
+                return Err(RouteError::Overloaded);
+            }
+            candidates_data = non_overloaded;
+        }
+
+        let candidates: Vec<Candidate> = candidates_data
+            .iter()
+            .map(|(ep, s)| Candidate {
+                endpoint: ep,
+                stats: s.as_ref(),
+            })
+            .collect();
+
+        let selected = self
+            .strategy
+            .select(&candidates)
+            .map(|i| candidates_data[i].0.clone())
+            .ok_or(RouteError::NoEndpoint)?;
+
+        if let Some(session_id) = ctx.session_id.clone() {
+            self.session_affinity
+                .insert(session_id, (selected.model_uid.clone(), selected.replica_id));
+        }
+
+        Ok(selected)
     }
 
     pub fn route_with_plan_version(
@@ -259,138 +454,29 @@ impl Router {
         model_uid: &str,
         plan_version: u64,
     ) -> Result<EndpointInfo, RouteError> {
-        // Session affinity check
-        if let Some(session_id) = ctx.session_id.as_deref() {
-            if let Some(aff) = self.session_affinity.get(session_id) {
-                let (aff_model_uid, aff_replica_id) = aff.value();
-                if aff_model_uid == model_uid {
-                    if let Some(ep) = self
-                        .endpoints
-                        .get(&(aff_model_uid.clone(), *aff_replica_id))
-                        .map(|v| v.value().clone())
-                    {
-                        if ep.status == EndpointStatus::Ready && ep.plan_version == plan_version {
-                            return Ok(ep);
-                        }
-                    }
-                }
-            }
-        }
+        self.route_internal(ctx, model_uid, Some(plan_version), None)
+    }
 
-        // Build candidate list: filter by model_uid, Ready, plan_version
-        let filtered: Vec<EndpointInfo> = self
-            .endpoints
-            .iter()
-            .filter(|e| {
-                let ep = e.value();
-                ep.model_uid == model_uid
-                    && ep.status == EndpointStatus::Ready
-                    && ep.plan_version == plan_version
-            })
-            .map(|e| e.value().clone())
-            .collect();
-
-        if filtered.is_empty() {
-            return Err(RouteError::NoEndpoint);
-        }
-
-        let stats_snapshot: Vec<Option<EndpointStats>> = filtered
-            .iter()
-            .map(|ep| self.get_fresh_stats(&ep.model_uid, ep.replica_id))
-            .collect();
-
-        // Admission control: reject if all endpoints are overloaded
-        if self.check_overloaded(&stats_snapshot) {
-            return Err(RouteError::Overloaded);
-        }
-
-        let candidates: Vec<Candidate> = filtered
-            .iter()
-            .zip(stats_snapshot.iter())
-            .map(|(ep, s)| Candidate {
-                endpoint: ep,
-                stats: s.as_ref(),
-            })
-            .collect();
-
-        let selected = self
-            .strategy
-            .select(&candidates)
-            .map(|i| filtered[i].clone())
-            .ok_or(RouteError::NoEndpoint)?;
-
-        if let Some(session_id) = ctx.session_id.clone() {
-            self.session_affinity
-                .insert(session_id, (selected.model_uid.clone(), selected.replica_id));
-        }
-
-        Ok(selected)
+    pub fn route_with_plan_version_excluding(
+        &self,
+        ctx: &ExecutionContext,
+        model_uid: &str,
+        plan_version: u64,
+        exclude: (&str, u32),
+    ) -> Result<EndpointInfo, RouteError> {
+        self.route_internal(ctx, model_uid, Some(plan_version), Some(exclude))
     }
 
     pub fn route(&self, ctx: &ExecutionContext, model_uid: &str) -> Result<EndpointInfo, RouteError> {
-        // Session affinity check
-        if let Some(session_id) = ctx.session_id.as_deref() {
-            if let Some(aff) = self.session_affinity.get(session_id) {
-                let (aff_model_uid, aff_replica_id) = aff.value();
-                if aff_model_uid == model_uid {
-                    if let Some(ep) = self
-                        .endpoints
-                        .get(&(aff_model_uid.clone(), *aff_replica_id))
-                        .map(|v| v.value().clone())
-                    {
-                        if ep.status == EndpointStatus::Ready {
-                            return Ok(ep);
-                        }
-                    }
-                }
-            }
-        }
+        self.route_internal(ctx, model_uid, None, None)
+    }
 
-        // Build candidate list: filter by model_uid, Ready
-        let filtered: Vec<EndpointInfo> = self
-            .endpoints
-            .iter()
-            .filter(|e| {
-                let ep = e.value();
-                ep.model_uid == model_uid && ep.status == EndpointStatus::Ready
-            })
-            .map(|e| e.value().clone())
-            .collect();
-
-        if filtered.is_empty() {
-            return Err(RouteError::NoEndpoint);
-        }
-
-        let stats_snapshot: Vec<Option<EndpointStats>> = filtered
-            .iter()
-            .map(|ep| self.get_fresh_stats(&ep.model_uid, ep.replica_id))
-            .collect();
-
-        // Admission control: reject if all endpoints are overloaded
-        if self.check_overloaded(&stats_snapshot) {
-            return Err(RouteError::Overloaded);
-        }
-
-        let candidates: Vec<Candidate> = filtered
-            .iter()
-            .zip(stats_snapshot.iter())
-            .map(|(ep, s)| Candidate {
-                endpoint: ep,
-                stats: s.as_ref(),
-            })
-            .collect();
-
-        let selected = self
-            .strategy
-            .select(&candidates)
-            .map(|i| filtered[i].clone())
-            .ok_or(RouteError::NoEndpoint)?;
-
-        if let Some(session_id) = ctx.session_id.clone() {
-            self.session_affinity
-                .insert(session_id, (selected.model_uid.clone(), selected.replica_id));
-        }
-
-        Ok(selected)
+    pub fn route_excluding(
+        &self,
+        ctx: &ExecutionContext,
+        model_uid: &str,
+        exclude: (&str, u32),
+    ) -> Result<EndpointInfo, RouteError> {
+        self.route_internal(ctx, model_uid, None, Some(exclude))
     }
 }

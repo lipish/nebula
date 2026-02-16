@@ -103,6 +103,11 @@ export async function apiDelete<T>(path: string, token?: string): Promise<T> {
 import type {
   AuthUser,
   CreateUserPayload,
+  GatewayLatency,
+  GatewayOverview,
+  GatewayProtection,
+  GatewayReliability,
+  GatewayTraffic,
   ManagedUser,
   ModelView,
   ModelDetailView,
@@ -178,4 +183,19 @@ export const v2 = {
 
   listAlerts: (token?: string) =>
     apiGet<DiskAlert[]>('/v2/alerts', token),
+
+  gatewayOverview: (window: string, token?: string) =>
+    apiGetWithParams<GatewayOverview>('/v2/observability/gateway/overview', { window }, token),
+
+  gatewayTraffic: (window: string, token?: string) =>
+    apiGetWithParams<GatewayTraffic>('/v2/observability/gateway/traffic', { window }, token),
+
+  gatewayReliability: (window: string, token?: string) =>
+    apiGetWithParams<GatewayReliability>('/v2/observability/gateway/reliability', { window }, token),
+
+  gatewayProtection: (window: string, token?: string) =>
+    apiGetWithParams<GatewayProtection>('/v2/observability/gateway/protection', { window }, token),
+
+  gatewayLatency: (window: string, token?: string) =>
+    apiGetWithParams<GatewayLatency>('/v2/observability/gateway/latency', { window }, token),
 }

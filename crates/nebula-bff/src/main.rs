@@ -90,6 +90,17 @@ async fn main() -> anyhow::Result<()> {
         .with_state(st.clone());
 
     let v2_routes = Router::new()
+        .route("/observability/gateway/overview", get(handlers_v2::gateway_overview))
+        .route("/observability/gateway/traffic", get(handlers_v2::gateway_traffic))
+        .route(
+            "/observability/gateway/reliability",
+            get(handlers_v2::gateway_reliability),
+        )
+        .route(
+            "/observability/gateway/protection",
+            get(handlers_v2::gateway_protection),
+        )
+        .route("/observability/gateway/latency", get(handlers_v2::gateway_latency))
         .route("/models", get(handlers_v2::list_models).post(handlers_v2::create_model))
         .route("/models/:model_uid", get(handlers_v2::get_model).put(handlers_v2::update_model).delete(handlers_v2::delete_model))
         .route("/models/:model_uid/start", post(handlers_v2::start_model))

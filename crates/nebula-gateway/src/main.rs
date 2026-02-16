@@ -80,6 +80,10 @@ async fn main() {
     let auth = parse_auth_from_env();
 
     let metrics = Arc::new(metrics::Metrics::default());
+    let max_request_body_bytes = std::env::var("NEBULA_GATEWAY_MAX_REQUEST_BODY_BYTES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(4 * 1024 * 1024);
 
     let audit = AuditWriter::spawn(args.xtrace_url.as_deref(), args.xtrace_token.as_deref());
 
@@ -91,6 +95,7 @@ async fn main() {
         store: Arc::new(store),
         auth,
         metrics,
+        max_request_body_bytes,
         log_path: args.log_path,
         audit,
         xtrace_url: args.xtrace_url.clone(),

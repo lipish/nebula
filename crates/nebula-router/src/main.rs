@@ -93,6 +93,19 @@ async fn main() -> anyhow::Result<()> {
 
     let metrics = Arc::new(metrics::Metrics::default());
 
+    let max_request_body_bytes = std::env::var("NEBULA_ROUTER_MAX_REQUEST_BODY_BYTES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(4 * 1024 * 1024);
+    let retry_max = std::env::var("NEBULA_ROUTER_RETRY_MAX")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(1);
+    let retry_backoff_ms = std::env::var("NEBULA_ROUTER_RETRY_BACKOFF_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(75);
+
     let auth = nebula_common::auth::parse_auth_from_env();
 
     let st = AppState {
@@ -101,6 +114,9 @@ async fn main() -> anyhow::Result<()> {
         http,
         plan_version,
         metrics,
+        max_request_body_bytes,
+        retry_max,
+        retry_backoff_ms,
         auth,
     };
 

@@ -87,6 +87,13 @@ pub struct Metrics {
     pub status_2xx: AtomicU64,
     pub status_4xx: AtomicU64,
     pub status_5xx: AtomicU64,
+    pub retry_total: AtomicU64,
+    pub retry_success_total: AtomicU64,
+    pub request_too_large_total: AtomicU64,
+    pub upstream_error_connect_total: AtomicU64,
+    pub upstream_error_timeout_total: AtomicU64,
+    pub upstream_error_5xx_total: AtomicU64,
+    pub upstream_error_other_total: AtomicU64,
 
     /// Per-model E2E latency histogram (seconds).
     pub e2e_latency: DashMap<String, Histogram>,
@@ -125,6 +132,27 @@ impl Metrics {
             counter.status_2xx.fetch_add(1, Ordering::Relaxed);
         }
     }
+
+    pub fn record_upstream_error(&self, kind: &str) {
+        match kind {
+            "connect" => {
+                self.upstream_error_connect_total
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "timeout" => {
+                self.upstream_error_timeout_total
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "upstream_5xx" => {
+                self.upstream_error_5xx_total
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {
+                self.upstream_error_other_total
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
 }
 
 pub async fn metrics_handler(State(st): State<AppState>) -> impl IntoResponse {
@@ -148,6 +176,41 @@ pub async fn metrics_handler(State(st): State<AppState>) -> impl IntoResponse {
         st.metrics.status_2xx.load(Ordering::Relaxed),
         st.metrics.status_4xx.load(Ordering::Relaxed),
         st.metrics.status_5xx.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_router_retry_total Total retry attempts to upstream.\n\
+         # TYPE nebula_router_retry_total counter\n\
+         nebula_router_retry_total {}\n",
+        st.metrics.retry_total.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_router_retry_success_total Retry attempts that succeeded.\n\
+         # TYPE nebula_router_retry_success_total counter\n\
+         nebula_router_retry_success_total {}\n",
+        st.metrics.retry_success_total.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_router_request_too_large_total Rejected requests due to max body size.\n\
+         # TYPE nebula_router_request_too_large_total counter\n\
+         nebula_router_request_too_large_total {}\n",
+        st.metrics.request_too_large_total.load(Ordering::Relaxed),
+    ));
+    body.push_str("# HELP nebula_router_upstream_error_total Upstream errors by kind.\n# TYPE nebula_router_upstream_error_total counter\n");
+    body.push_str(&format!(
+        "nebula_router_upstream_error_total{{kind=\"connect\"}} {}\n",
+        st.metrics.upstream_error_connect_total.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "nebula_router_upstream_error_total{{kind=\"timeout\"}} {}\n",
+        st.metrics.upstream_error_timeout_total.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "nebula_router_upstream_error_total{{kind=\"upstream_5xx\"}} {}\n",
+        st.metrics.upstream_error_5xx_total.load(Ordering::Relaxed),
+    ));
+    body.push_str(&format!(
+        "nebula_router_upstream_error_total{{kind=\"other\"}} {}\n",
+        st.metrics.upstream_error_other_total.load(Ordering::Relaxed),
     ));
     body.push_str(&format!(
         "# HELP nebula_router_xtrace_query_errors_total xtrace query errors in stats sync loop.\n\
@@ -178,6 +241,18 @@ pub async fn metrics_handler(State(st): State<AppState>) -> impl IntoResponse {
          # TYPE nebula_router_route_stale_stats_dropped_total counter\n\
          nebula_router_route_stale_stats_dropped_total {}\n",
         st.router.route_stale_stats_dropped_total(),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_router_route_circuit_skipped_total candidates skipped due to open endpoint circuit breaker.\n\
+         # TYPE nebula_router_route_circuit_skipped_total counter\n\
+         nebula_router_route_circuit_skipped_total {}\n",
+        st.router.route_circuit_skipped_total(),
+    ));
+    body.push_str(&format!(
+        "# HELP nebula_router_circuit_open_total endpoint circuit breaker openings.\n\
+         # TYPE nebula_router_circuit_open_total counter\n\
+         nebula_router_circuit_open_total {}\n",
+        st.router.circuit_open_total(),
     ));
 
     // Per-model counters

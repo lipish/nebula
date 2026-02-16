@@ -18,6 +18,7 @@ const Sidebar = ({ page, setPage }: SidebarProps) => {
         { id: 'dashboard', icon: LayoutDashboard, label: t('nav.dashboard') },
         { id: 'models', icon: Box, label: t('nav.models') },
         { id: 'inference', icon: Activity, label: t('nav.inference') },
+        { id: 'gateway', icon: Shield, label: t('nav.gateway') },
         { id: 'endpoints', icon: Cpu, label: t('nav.endpoints') },
     ];
 

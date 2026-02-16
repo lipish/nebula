@@ -12,6 +12,9 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub plan_version: Arc<AtomicU64>,
     pub metrics: Arc<Metrics>,
+    pub max_request_body_bytes: usize,
+    pub retry_max: u32,
+    pub retry_backoff_ms: u64,
     pub auth: AuthConfig,
 }
 

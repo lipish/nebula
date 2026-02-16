@@ -4,6 +4,12 @@
 
 已从 Prometheus + Grafana 转向自研轻量级方案 xtrace（/Users/home/github/xtrace）。
 
+### 术语与职责边界（统一口径）
+
+- **数据层（Backend）**：xtrace / nebula-observe 负责采集、存储、查询（metrics/traces API）。
+- **展示层（Frontend）**：Nebula 前端负责 Dashboard/Panel（图表、卡片、告警态、表格）。
+- 结论：xtrace 本身不作为最终产品化 UI；“观测面板”属于前端能力。
+
 ### 已完成的集成
 
 1. **nebula-observe** — 内嵌 xtrace 服务的独立组件（依赖 xtrace 0.0.7 的 run_server），已部署在 10.21.11.92:8742
@@ -17,6 +23,7 @@
 - Metrics 时序采集（POST /v1/metrics/batch）
 - PostgreSQL 存储，异步微批写入
 - 查询 API：traces 列表、trace 详情、metrics query/names
+- 为前端观测面板提供数据查询后端（而非面板 UI 本体）
 
 ### Nebula 上报的指标
 

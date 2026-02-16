@@ -15,6 +15,16 @@ use nebula_common::ExecutionContext;
 
 use crate::state::AppState;
 
+fn classify_reqwest_error(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        return "timeout";
+    }
+    if error.is_connect() {
+        return "connect";
+    }
+    "other"
+}
+
 pub async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
@@ -90,9 +100,15 @@ pub async fn proxy_chat_completions(
     let (method_reqwest, body_bytes, model_uid) = match method {
         axum::http::Method::GET => (reqwest::Method::GET, None, st.model_uid.clone()),
         axum::http::Method::POST => {
-            let body_bytes = match axum::body::to_bytes(req.into_body(), usize::MAX).await {
+            let body_bytes = match axum::body::to_bytes(req.into_body(), st.max_request_body_bytes).await {
                 Ok(b) => b,
-                Err(_) => return (StatusCode::BAD_REQUEST, "invalid body").into_response(),
+                Err(_) => {
+                    st.metrics
+                        .request_too_large_total
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    st.metrics.record_model_status(&st.model_uid, 413);
+                    return (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response();
+                }
             };
 
             let raw_model =
@@ -130,61 +146,118 @@ pub async fn proxy_chat_completions(
 
     let plan_version = st.plan_version.load(std::sync::atomic::Ordering::Relaxed);
 
-    let ep = if model_uid == st.model_uid && plan_version > 0 {
-        st.router
-            .route_with_plan_version(&_ctx, &model_uid, plan_version)
-    } else {
-        st.router.route(&_ctx, &model_uid)
-    };
+    let mut attempt: u32 = 0;
+    let max_attempts = st.retry_max.saturating_add(1).max(1);
+    let mut excluded_endpoint: Option<(String, u32)> = None;
 
-    let ep = match ep {
-        Ok(ep) => ep,
-        Err(nebula_router::RouteError::Overloaded) => {
-            st.metrics.record_model_status(&model_uid, 429);
-            return Response::builder()
-                .status(StatusCode::TOO_MANY_REQUESTS)
-                .header("Retry-After", "5")
-                .body(Body::from(format!(
-                    "all endpoints overloaded for model '{}'",
-                    model_uid
-                )))
-                .unwrap_or_else(|_| Response::new(Body::empty()));
+    let (_selected_ep, resp) = loop {
+        let ep = if model_uid == st.model_uid && plan_version > 0 {
+            if let Some((exclude_model_uid, exclude_replica_id)) = excluded_endpoint.as_ref() {
+                st.router.route_with_plan_version_excluding(
+                    &_ctx,
+                    &model_uid,
+                    plan_version,
+                    (exclude_model_uid.as_str(), *exclude_replica_id),
+                )
+            } else {
+                st.router
+                    .route_with_plan_version(&_ctx, &model_uid, plan_version)
+            }
+        } else if let Some((exclude_model_uid, exclude_replica_id)) = excluded_endpoint.as_ref() {
+            st.router
+                .route_excluding(&_ctx, &model_uid, (exclude_model_uid.as_str(), *exclude_replica_id))
+        } else {
+            st.router.route(&_ctx, &model_uid)
+        };
+
+        let ep = match ep {
+            Ok(ep) => ep,
+            Err(nebula_router::RouteError::Overloaded) => {
+                st.metrics.record_model_status(&model_uid, 429);
+                return Response::builder()
+                    .status(StatusCode::TOO_MANY_REQUESTS)
+                    .header("Retry-After", "5")
+                    .body(Body::from(format!(
+                        "all endpoints overloaded for model '{}'",
+                        model_uid
+                    )))
+                    .unwrap_or_else(|_| Response::new(Body::empty()));
+            }
+            Err(_) => {
+                st.metrics.record_model_status(&model_uid, 503);
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!("no ready endpoint for model '{}'", model_uid),
+                )
+                    .into_response();
+            }
+        };
+
+        let base = match ep.base_url.as_deref() {
+            Some(s) => s.trim_end_matches('/'),
+            None => {
+                st.metrics.record_model_status(&model_uid, 503);
+                return (StatusCode::SERVICE_UNAVAILABLE, "endpoint missing base_url")
+                    .into_response();
+            }
+        };
+
+        let url = format!("{base}{uri_path}{uri_query}");
+        let mut builder = st
+            .http
+            .request(method_reqwest.clone(), url)
+            .headers(to_reqwest_headers(&headers));
+
+        if let Some(b) = body_bytes.clone() {
+            builder = builder.body(b);
         }
-        Err(_) => {
-            st.metrics.record_model_status(&model_uid, 503);
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                format!("no ready endpoint for model '{}'", model_uid),
-            )
-                .into_response();
-        }
-    };
 
-    let base = match ep.base_url.as_deref() {
-        Some(s) => s.trim_end_matches('/'),
-        None => {
-            st.metrics.record_model_status(&model_uid, 503);
-            return (StatusCode::SERVICE_UNAVAILABLE, "endpoint missing base_url").into_response();
-        }
-    };
+        match builder.send().await {
+            Ok(resp) => {
+                if resp.status().is_server_error() {
+                    st.router
+                        .record_endpoint_failure(&ep.model_uid, ep.replica_id);
+                    st.metrics.record_upstream_error("upstream_5xx");
+                    if attempt + 1 < max_attempts {
+                        attempt += 1;
+                        excluded_endpoint = Some((ep.model_uid.clone(), ep.replica_id));
+                        st.metrics
+                            .retry_total
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        tokio::time::sleep(std::time::Duration::from_millis(st.retry_backoff_ms)).await;
+                        continue;
+                    }
+                } else if attempt > 0 {
+                    st.metrics
+                        .retry_success_total
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
 
-    let url = format!("{base}{uri_path}{uri_query}");
-    let mut builder = st
-        .http
-        .request(method_reqwest, url)
-        .headers(to_reqwest_headers(&headers));
+                st.router
+                    .record_endpoint_success(&ep.model_uid, ep.replica_id);
 
-    if let Some(b) = body_bytes {
-        builder = builder.body(b);
-    }
+                break (ep, resp);
+            }
+            Err(e) => {
+                st.router
+                    .record_endpoint_failure(&ep.model_uid, ep.replica_id);
+                let kind = classify_reqwest_error(&e);
+                st.metrics.record_upstream_error(kind);
+                tracing::error!(error=%e, retry_kind=%kind, attempt, "router upstream request failed");
+                if attempt + 1 < max_attempts {
+                    attempt += 1;
+                    excluded_endpoint = Some((ep.model_uid.clone(), ep.replica_id));
+                    st.metrics
+                        .retry_total
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    tokio::time::sleep(std::time::Duration::from_millis(st.retry_backoff_ms)).await;
+                    continue;
+                }
 
-    let resp = match builder.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!(error=%e, "router upstream request failed");
-            st.metrics.record_model_status(&model_uid, 502);
-            st.metrics.observe_e2e_latency(&model_uid, request_start.elapsed().as_secs_f64());
-            return (StatusCode::BAD_GATEWAY, "upstream request failed").into_response();
+                st.metrics.record_model_status(&model_uid, 502);
+                st.metrics.observe_e2e_latency(&model_uid, request_start.elapsed().as_secs_f64());
+                return (StatusCode::BAD_GATEWAY, "upstream request failed").into_response();
+            }
         }
     };
 

@@ -26,6 +26,7 @@ import { NodesView } from '@/components/views/nodes'
 import { SettingsView } from '@/components/views/settings'
 import { InferenceView } from '@/components/views/inference'
 import { EndpointsView } from '@/components/views/endpoints'
+import { GatewayView } from '@/components/views/gateway'
 import { AuditView } from '@/components/views/audit'
 import { ImagesView } from '@/components/views/images'
 import { TemplatesView } from '@/components/views/templates'
@@ -42,7 +43,7 @@ const EMPTY_OVERVIEW: ClusterStatus = {
   model_requests: [],
 }
 
-type Page = 'dashboard' | 'models' | 'model-detail' | 'model-catalog' | 'model-library' | 'nodes' | 'settings' | 'inference' | 'endpoints' | 'audit' | 'images' | 'templates' | 'profile' | 'account-settings'
+type Page = 'dashboard' | 'models' | 'model-detail' | 'model-catalog' | 'model-library' | 'nodes' | 'settings' | 'inference' | 'gateway' | 'endpoints' | 'audit' | 'images' | 'templates' | 'profile' | 'account-settings'
 
 const PAGE_PATH: Record<Page, string> = {
   dashboard: '/',
@@ -53,6 +54,7 @@ const PAGE_PATH: Record<Page, string> = {
   nodes: '/infrastructure/nodes',
   settings: '/system/settings',
   inference: '/inference',
+  gateway: '/inference/gateway',
   endpoints: '/endpoints',
   audit: '/resources/audit',
   images: '/infrastructure/images',
@@ -462,6 +464,9 @@ function App() {
         )}
         {page === 'inference' && (
           <InferenceView overview={overview} metricsRaw={metricsRaw} engineStats={engineStats} />
+        )}
+        {page === 'gateway' && (
+          <GatewayView token={token} />
         )}
         {page === 'endpoints' && (
           <EndpointsView overview={overview} pct={pct} engineStats={engineStats} />

@@ -16,6 +16,7 @@ pub struct AppState {
     pub store: Arc<EtcdMetaStore>,
     pub auth: AuthConfig,
     pub metrics: Arc<Metrics>,
+    pub max_request_body_bytes: usize,
     pub log_path: String,
     pub audit: Option<Arc<AuditWriter>>,
     pub xtrace_url: Option<String>,

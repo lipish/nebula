@@ -264,6 +264,59 @@ export interface DiskAlert {
   created_at_ms: number
 }
 
+export interface GatewayTimePoint {
+  ts: string
+  value: number
+}
+
+export interface GatewayOverview {
+  window: string
+  rps: number
+  error_5xx_ratio: number
+  retry_success_ratio: number
+  circuit_open_count: number
+}
+
+export interface GatewayTraffic {
+  window: string
+  series: {
+    requests_total: GatewayTimePoint[]
+    responses_2xx: GatewayTimePoint[]
+    responses_4xx: GatewayTimePoint[]
+    responses_5xx: GatewayTimePoint[]
+  }
+}
+
+export interface GatewayReliability {
+  window: string
+  series: {
+    retry_total: GatewayTimePoint[]
+    retry_success_total: GatewayTimePoint[]
+    upstream_error_connect: GatewayTimePoint[]
+    upstream_error_timeout: GatewayTimePoint[]
+    upstream_error_5xx: GatewayTimePoint[]
+    upstream_error_other: GatewayTimePoint[]
+  }
+}
+
+export interface GatewayProtection {
+  window: string
+  request_too_large_count: number
+  circuit_skipped_count: number
+  circuit_open_count: number
+}
+
+export interface GatewayLatency {
+  window: string
+  series: {
+    latency_p50_ms: GatewayTimePoint[]
+    latency_p95_ms: GatewayTimePoint[]
+    latency_p99_ms: GatewayTimePoint[]
+    ttft_p50_ms: GatewayTimePoint[]
+    ttft_p95_ms: GatewayTimePoint[]
+  }
+}
+
 export interface AuthUser {
   id: string
   username: string

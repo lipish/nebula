@@ -145,6 +145,16 @@ fn append_headers(src: &reqwest::header::HeaderMap, dst: &mut Response) {
     }
 }
 
+fn classify_reqwest_error(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        return "timeout";
+    }
+    if error.is_connect() {
+        return "connect";
+    }
+    "other"
+}
+
 pub async fn proxy_post(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -159,9 +169,14 @@ pub async fn proxy_post(
         .unwrap_or_default();
     let url = format!("{base}{uri_path}{uri_query}");
 
-    let body_bytes = match axum::body::to_bytes(req.into_body(), usize::MAX).await {
+    let body_bytes = match axum::body::to_bytes(req.into_body(), st.max_request_body_bytes).await {
         Ok(b) => b,
-        Err(_) => return (StatusCode::BAD_REQUEST, "invalid body").into_response(),
+        Err(_) => {
+            st.metrics
+                .request_too_large_total
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response();
+        }
     };
 
     let resp = match st
@@ -174,6 +189,8 @@ pub async fn proxy_post(
     {
         Ok(r) => r,
         Err(e) => {
+            let kind = classify_reqwest_error(&e);
+            st.metrics.record_upstream_error(kind);
             tracing::error!(error=%e, "upstream request failed");
             return (StatusCode::BAD_GATEWAY, "upstream request failed").into_response();
         }
@@ -245,9 +262,14 @@ pub async fn proxy_v2(
     let url = format!("{bff_base}/api/v2{rest}{uri_query}");
     let method = req.method().clone();
 
-    let body_bytes = match axum::body::to_bytes(req.into_body(), usize::MAX).await {
+    let body_bytes = match axum::body::to_bytes(req.into_body(), st.max_request_body_bytes).await {
         Ok(b) => b,
-        Err(_) => return (StatusCode::BAD_REQUEST, "invalid body").into_response(),
+        Err(_) => {
+            st.metrics
+                .request_too_large_total
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response();
+        }
     };
 
     let reqwest_method =
@@ -263,6 +285,8 @@ pub async fn proxy_v2(
     {
         Ok(r) => r,
         Err(e) => {
+            let kind = classify_reqwest_error(&e);
+            st.metrics.record_upstream_error(kind);
             tracing::error!(error=%e, url=%url, "bff proxy request failed");
             return (StatusCode::BAD_GATEWAY, "bff proxy request failed").into_response();
         }
