@@ -158,14 +158,14 @@ open http://127.0.0.1:8081/v1/admin/ui
 
 BFF 提供 `/api/v2/*`、`/api/audit-logs`、`/api/observe/*` 等管理与观测接口，访问 xtrace 时支持两种模式：
 
-- `XTRACE_AUTH_MODE=internal`：内网信任模式，不向 xtrace 发送 Bearer token（开发环境推荐）
-- `XTRACE_AUTH_MODE=service`：服务鉴权模式，必须配置 `XTRACE_TOKEN`（生产环境推荐）
+- `OBSERVE_AUTH_MODE=internal`：内网信任模式，不向 xtrace 发送 Bearer token（开发环境推荐）
+- `OBSERVE_AUTH_MODE=service`：服务鉴权模式，必须配置 `OBSERVE_TOKEN`（生产环境推荐）
 
 ### 开发环境推荐（默认）
 
 ```bash
-export XTRACE_URL=http://127.0.0.1:8742
-export XTRACE_AUTH_MODE=internal
+export OBSERVE_URL=http://127.0.0.1:8742
+export OBSERVE_AUTH_MODE=internal
 
 ./target/debug/nebula-bff \
   --listen-addr 0.0.0.0:18090 \
@@ -176,9 +176,9 @@ export XTRACE_AUTH_MODE=internal
 ### 生产环境推荐
 
 ```bash
-export XTRACE_URL=http://xtrace:8742
-export XTRACE_AUTH_MODE=service
-export XTRACE_TOKEN=<your-internal-service-token>
+export OBSERVE_URL=http://xtrace:8742
+export OBSERVE_AUTH_MODE=service
+export OBSERVE_TOKEN=<your-internal-service-token>
 
 ./target/debug/nebula-bff \
   --listen-addr 0.0.0.0:18090 \
@@ -186,7 +186,7 @@ export XTRACE_TOKEN=<your-internal-service-token>
   --router-url http://127.0.0.1:18081
 ```
 
-当 `XTRACE_AUTH_MODE=service` 且 `XTRACE_TOKEN` 为空时，BFF 会返回配置错误，避免误以为是权限问题。
+当 `OBSERVE_AUTH_MODE=service` 且 `OBSERVE_TOKEN` 为空时，BFF 会返回配置错误，避免误以为是权限问题。
 
 ### 避免 `{"message":"Unauthorized"}` 的固定检查清单
 
@@ -197,11 +197,11 @@ export XTRACE_TOKEN=<your-internal-service-token>
 test -f ~/github/nebula/deploy/nebula.env && echo "nebula.env ok"
 
 # 2) 确认三项关键配置
-grep -E '^XTRACE_URL=|^XTRACE_AUTH_MODE=|^XTRACE_TOKEN=' ~/github/nebula/deploy/nebula.env
+grep -E '^OBSERVE_URL=|^OBSERVE_AUTH_MODE=|^OBSERVE_TOKEN=' ~/github/nebula/deploy/nebula.env
 
 # 3) 推荐自动对齐 xtrace token（从 xtrace .env 读取）
 TOKEN=$(grep -E '^API_BEARER_TOKEN=' ~/github/xtrace/.env | head -n1 | cut -d= -f2-)
-sed -i "s|^XTRACE_TOKEN=.*$|XTRACE_TOKEN=${TOKEN}|" ~/github/nebula/deploy/nebula.env
+sed -i "s|^OBSERVE_TOKEN=.*$|OBSERVE_TOKEN=${TOKEN}|" ~/github/nebula/deploy/nebula.env
 
 # 4) 重启 Nebula 并验证 audit API
 cd ~/github/nebula && ./bin/nebula-down.sh || true && START_BFF=1 ./bin/nebula-up.sh
@@ -265,8 +265,8 @@ curl -N http://127.0.0.1:8081/v1/responses \
 按顺序排查：
 
 1. `deploy/nebula.env` 是否存在；
-2. `XTRACE_AUTH_MODE` 是否为 `service` 且 `XTRACE_TOKEN` 非空；
-3. `XTRACE_TOKEN` 是否与 `~/github/xtrace/.env` 的 `API_BEARER_TOKEN` 一致；
+2. `OBSERVE_AUTH_MODE` 是否为 `service` 且 `OBSERVE_TOKEN` 非空；
+3. `OBSERVE_TOKEN` 是否与 `~/github/xtrace/.env` 的 `API_BEARER_TOKEN` 一致；
 4. 重启后确认进程参数中包含 `--xtrace-token` 非空：
 
 ```bash
@@ -334,30 +334,30 @@ docker compose up -d --build
 开发环境可直接：
 
 ```bash
-XTRACE_AUTH_MODE=internal docker compose up -d --build
+OBSERVE_AUTH_MODE=internal docker compose up -d --build
 ```
 
 生产建议：
 
 ```bash
-XTRACE_AUTH_MODE=service \
-XTRACE_TOKEN=<internal-service-token> \
-XTRACE_URL=<xtrace-endpoint> \
+OBSERVE_AUTH_MODE=service \
+OBSERVE_TOKEN=<internal-service-token> \
+OBSERVE_URL=<xtrace-endpoint> \
 docker compose up -d --build
 ```
 
 如需在 compose 内同时启动 xtrace（可选）：
 
 ```bash
-XTRACE_URL=http://xtrace:8742 \
-XTRACE_AUTH_MODE=service \
-XTRACE_TOKEN=<internal-service-token> \
+OBSERVE_URL=http://xtrace:8742 \
+OBSERVE_AUTH_MODE=service \
+OBSERVE_TOKEN=<internal-service-token> \
 docker compose --profile observe up -d --build
 ```
 
 可选环境变量：
-- `XTRACE_IMAGE`：xtrace 镜像地址（默认 `ghcr.io/lipish/xtrace:latest`）
-- `XTRACE_DATABASE_URL`：xtrace 数据库连接串
+- `OBSERVE_IMAGE`：observe（xtrace）镜像地址（默认 `ghcr.io/lipish/xtrace:latest`）
+- `OBSERVE_DATABASE_URL`：observe（xtrace）数据库连接串（建议数据库名为 `observe`）
 
 默认使用 `NEBULA_AUTH_TOKENS="devtoken:admin,viewtoken:viewer"`，可在 `docker-compose.yml` 中调整。
 
@@ -373,10 +373,13 @@ cp deploy/nebula.env.example deploy/nebula.env
 
 ```bash
 START_BFF=1
-XTRACE_URL=http://127.0.0.1:8742
-XTRACE_AUTH_MODE=service
-XTRACE_TOKEN=<API_BEARER_TOKEN>
+BFF_DATABASE_URL=postgresql://<nebula_user>:<nebula_pass>@127.0.0.1:5432/nebula
+OBSERVE_URL=http://127.0.0.1:8742
+OBSERVE_AUTH_MODE=service
+OBSERVE_TOKEN=<API_BEARER_TOKEN>
 ```
+
+注意：`BFF_DATABASE_URL` 必须使用 Nebula 独立数据库（推荐 `nebula`），不要与 observe（xtrace）数据库（推荐 `observe`）共用。
 
 随后直接使用：
 

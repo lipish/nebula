@@ -15,11 +15,11 @@ pub struct Args {
     pub routing_strategy: String,
 
     /// OTLP endpoint for exporting traces (e.g. "http://10.21.11.92:8742/api/public/otel").
-    #[arg(long, env = "XTRACE_URL")]
+    #[arg(long, env = "OBSERVE_URL")]
     pub xtrace_url: Option<String>,
 
     /// Bearer token for xtrace authentication.
-    #[arg(long, env = "XTRACE_TOKEN")]
+    #[arg(long, env = "OBSERVE_TOKEN")]
     pub xtrace_token: Option<String>,
 
     /// Log output format: "text" (human-readable, default) or "json" (structured).

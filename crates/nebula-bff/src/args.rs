@@ -3,7 +3,7 @@ use clap::{Parser, ValueEnum};
 #[derive(Debug, Clone, Copy, ValueEnum)]
 #[value(rename_all = "lower")]
 pub enum XtraceAuthMode {
-    /// Use service-to-service bearer token (XTRACE_TOKEN).
+    /// Use service-to-service bearer token (OBSERVE_TOKEN).
     Service,
     /// Trust internal network, do not send auth header to xtrace.
     Internal,
@@ -30,14 +30,14 @@ pub struct Args {
     pub session_ttl_hours: i64,
 
     /// xtrace (nebula-observe) base URL for observability queries.
-    #[arg(long, env = "XTRACE_URL", default_value = "http://127.0.0.1:8742")]
+    #[arg(long, env = "OBSERVE_URL", default_value = "http://127.0.0.1:8742")]
     pub xtrace_url: String,
 
     /// xtrace bearer token for authentication.
-    #[arg(long, env = "XTRACE_TOKEN", default_value = "")]
+    #[arg(long, env = "OBSERVE_TOKEN", default_value = "")]
     pub xtrace_token: String,
 
     /// xtrace auth mode: service (token) or internal (no token).
-    #[arg(long, env = "XTRACE_AUTH_MODE", value_enum, default_value_t = XtraceAuthMode::Service)]
+    #[arg(long, env = "OBSERVE_AUTH_MODE", value_enum, default_value_t = XtraceAuthMode::Service)]
     pub xtrace_auth_mode: XtraceAuthMode,
 }

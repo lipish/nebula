@@ -24,28 +24,35 @@ MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-0.5B-Instruct}"
 NODE_ID="${NODE_ID:-node_gpu0}"
 
 # xtrace config for observability/audit APIs.
-# XTRACE_TOKEN is the bearer token used when Nebula calls xtrace.
-# Example: export XTRACE_TOKEN="nebula-xtrace-token-2026"
-XTRACE_URL="${XTRACE_URL:-http://127.0.0.1:8742}"
-XTRACE_TOKEN="${XTRACE_TOKEN:-}"
-XTRACE_AUTH_MODE="${XTRACE_AUTH_MODE:-internal}"
+# OBSERVE_TOKEN is the bearer token used when Nebula calls xtrace.
+# Example: export OBSERVE_TOKEN="nebula-xtrace-token-2026"
+OBSERVE_URL="${OBSERVE_URL:-http://127.0.0.1:8742}"
+OBSERVE_TOKEN="${OBSERVE_TOKEN:-}"
+OBSERVE_AUTH_MODE="${OBSERVE_AUTH_MODE:-internal}"
 BFF_DATABASE_URL="${BFF_DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:5432/nebula}"
 
 # Set START_BFF=1 to run nebula-bff locally (recommended for frontend /api + /api/v2).
-# Example: START_BFF=1 XTRACE_TOKEN=nebula-xtrace-token-2026 ./bin/nebula-up.sh
+# Example: START_BFF=1 OBSERVE_TOKEN=nebula-xtrace-token-2026 ./bin/nebula-up.sh
 START_BFF="${START_BFF:-0}"
 
 # Preflight checks to avoid frequent xtrace auth misconfiguration.
-if [ "$START_BFF" = "1" ] && [ "$XTRACE_AUTH_MODE" = "service" ] && [ -z "$XTRACE_TOKEN" ]; then
-    echo "ERROR: XTRACE_AUTH_MODE=service but XTRACE_TOKEN is empty."
-    echo "Fix: set XTRACE_TOKEN in $ENV_FILE (or export it) before starting."
-    echo "Tip: XTRACE_TOKEN=\$(grep -E '^API_BEARER_TOKEN=' ~/github/xtrace/.env | head -n1 | cut -d= -f2-)"
+if [ "$START_BFF" = "1" ] && [ "$OBSERVE_AUTH_MODE" = "service" ] && [ -z "$OBSERVE_TOKEN" ]; then
+    echo "ERROR: OBSERVE_AUTH_MODE=service but OBSERVE_TOKEN is empty."
+    echo "Fix: set OBSERVE_TOKEN in $ENV_FILE (or export it) before starting."
+    echo "Tip: OBSERVE_TOKEN=\$(grep -E '^API_BEARER_TOKEN=' ~/github/xtrace/.env | head -n1 | cut -d= -f2-)"
+    exit 1
+fi
+
+# BFF auth/session storage must use Nebula's own database, not observe (xtrace) database.
+if [ "$START_BFF" = "1" ] && echo "$BFF_DATABASE_URL" | grep -Eiq '/(observe|xtrace)([/?].*)?$'; then
+    echo "ERROR: BFF_DATABASE_URL points to observe/xtrace database."
+    echo "Fix: use a dedicated Nebula DB, e.g. postgresql://<user>:<pass>@127.0.0.1:5432/nebula"
     exit 1
 fi
 
 if [ "$START_BFF" = "1" ] && [ ! -f "$ENV_FILE" ]; then
     echo "WARN: $ENV_FILE not found; using process env only."
-    echo "      Missing XTRACE_TOKEN often causes /api/audit-logs Unauthorized."
+    echo "      Missing OBSERVE_TOKEN often causes /api/audit-logs Unauthorized."
 fi
 
 mkdir -p "$LOG_DIR"
@@ -53,10 +60,10 @@ mkdir -p "$LOG_DIR"
 echo "Starting Nebula Service Stack..."
 echo "Logs will be written to $LOG_DIR"
 echo "env file: $ENV_FILE"
-echo "xtrace url: $XTRACE_URL"
-echo "xtrace auth mode: $XTRACE_AUTH_MODE"
+echo "xtrace url: $OBSERVE_URL"
+echo "xtrace auth mode: $OBSERVE_AUTH_MODE"
 echo "bff database: $BFF_DATABASE_URL"
-if [ -z "$XTRACE_TOKEN" ]; then
+if [ -z "$OBSERVE_TOKEN" ]; then
     echo "xtrace token: (empty)"
 else
     echo "xtrace token: (configured)"
@@ -92,9 +99,9 @@ if [ "$START_BFF" = "1" ]; then
         --etcd-endpoint "$ETCD_ENDPOINT" \
         --router-url "http://127.0.0.1:$ROUTER_PORT" \
         --database-url "$BFF_DATABASE_URL" \
-        --xtrace-url "$XTRACE_URL" \
-        --xtrace-token "$XTRACE_TOKEN" \
-        --xtrace-auth-mode "$XTRACE_AUTH_MODE" > "$LOG_DIR/bff.log" 2>&1 &
+        --xtrace-url "$OBSERVE_URL" \
+        --xtrace-token "$OBSERVE_TOKEN" \
+        --xtrace-auth-mode "$OBSERVE_AUTH_MODE" > "$LOG_DIR/bff.log" 2>&1 &
 fi
 
 # 3. Start Gateway
@@ -102,8 +109,8 @@ nohup "$NEBULA_ROOT/target/release/nebula-gateway" \
     --listen-addr "0.0.0.0:$GATEWAY_PORT" \
     --router-url "http://127.0.0.1:$ROUTER_PORT" \
     --bff-url "http://127.0.0.1:$BFF_PORT" \
-    --xtrace-url "$XTRACE_URL" \
-    --xtrace-token "$XTRACE_TOKEN" > "$LOG_DIR/gateway.log" 2>&1 &
+    --xtrace-url "$OBSERVE_URL" \
+    --xtrace-token "$OBSERVE_TOKEN" > "$LOG_DIR/gateway.log" 2>&1 &
 
 # 4. Start Node (docker mode — all vLLM runs inside containers)
 VLLM_IMAGE="vllm/vllm-openai:v0.11.0"

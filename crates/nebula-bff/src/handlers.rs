@@ -535,7 +535,7 @@ async fn load_model_with_request(
 /// Generic helper: proxy a GET request to xtrace, forwarding query string.
 ///
 /// Auth behavior:
-/// - service: require and send `XTRACE_TOKEN`
+/// - service: require and send `OBSERVE_TOKEN`
 /// - internal: try without auth; on 401, retry with service token or caller token
 async fn xtrace_proxy_get(
     st: &AppState,
@@ -563,7 +563,7 @@ async fn xtrace_proxy_get(
                 return error_response(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "misconfigured",
-                    "XTRACE_AUTH_MODE=service requires XTRACE_TOKEN",
+                    "OBSERVE_AUTH_MODE=service requires OBSERVE_TOKEN",
                 );
             }
             match send(Some(&st.xtrace_token)).send().await {

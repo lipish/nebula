@@ -13,8 +13,8 @@ git clone --depth 1 https://github.com/lipish/nebula.git
 **安装依赖：** 参阅 [开发环境设置指南](docs/setup.md) 安装所需的外部依赖（etcd、protoc 等）。
 
 **部署与鉴权建议：** 参阅 [部署指南](docs/deployment.md)。其中 BFF 访问 xtrace 推荐：
-- 开发环境：`XTRACE_AUTH_MODE=internal`
-- 生产环境：`XTRACE_AUTH_MODE=service` + `XTRACE_TOKEN=<internal-service-token>`
+- 开发环境：`OBSERVE_AUTH_MODE=internal`
+- 生产环境：`OBSERVE_AUTH_MODE=service` + `OBSERVE_TOKEN=<internal-service-token>`
 
 ## 项目结构
 

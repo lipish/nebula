@@ -12,11 +12,11 @@ pub struct Args {
     pub default_port: u16,
 
     /// xtrace URL for querying engine stats (e.g. "http://10.21.11.92:8742/").
-    #[arg(long, env = "XTRACE_URL")]
+    #[arg(long, env = "OBSERVE_URL")]
     pub xtrace_url: Option<String>,
 
     /// Bearer token for xtrace authentication.
-    #[arg(long, env = "XTRACE_TOKEN")]
+    #[arg(long, env = "OBSERVE_TOKEN")]
     pub xtrace_token: Option<String>,
 
     /// Address for the metrics / health HTTP server.

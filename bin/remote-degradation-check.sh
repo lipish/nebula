@@ -106,7 +106,7 @@ PY
   echo \$! > ${STALE_MOCK_PID_FILE}
 "
 
-set_env_key "$TMP_ENV" "XTRACE_URL" "http://127.0.0.1:${STALE_MOCK_PORT}"
+set_env_key "$TMP_ENV" "OBSERVE_URL" "http://127.0.0.1:${STALE_MOCK_PORT}"
 set_env_key "$TMP_ENV" "NEBULA_XTRACE_METRIC_MAX_AGE_MS" "120000"
 scp -q "$TMP_ENV" "${USER_NAME}@${HOST}:${REMOTE_ENV_PATH}"
 restart_remote_stack
@@ -159,7 +159,7 @@ PY
   echo \$! > ${MOCK_PID_FILE}
 "
 
-set_env_key "$TMP_ENV" "XTRACE_URL" "http://127.0.0.1:${MOCK_PORT}"
+set_env_key "$TMP_ENV" "OBSERVE_URL" "http://127.0.0.1:${MOCK_PORT}"
 set_env_key "$TMP_ENV" "NEBULA_XTRACE_METRIC_MAX_AGE_MS" "120000"
 scp -q "$TMP_ENV" "${USER_NAME}@${HOST}:${REMOTE_ENV_PATH}"
 restart_remote_stack

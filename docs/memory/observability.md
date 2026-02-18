@@ -15,7 +15,7 @@
 1. **nebula-observe** — 内嵌 xtrace 服务的独立组件（依赖 xtrace 0.0.7 的 run_server），已部署在 10.21.11.92:8742
 2. **nebula-node** — 心跳循环中通过 xtrace-client push_metrics 上报 GPU/KV cache/pending requests 指标
 3. **OTLP tracing** — gateway/node/router 三个组件通过 nebula-common::telemetry::init_tracing 统一接入 OTLP/HTTP exporter，将 tracing spans 推送到 xtrace 的 /api/public/otel/v1/traces 端点
-4. 所有组件支持 --xtrace-url / --xtrace-token 参数（环境变量 XTRACE_URL / XTRACE_TOKEN）
+4. 所有组件支持 --xtrace-url / --xtrace-token 参数（环境变量 OBSERVE_URL / OBSERVE_TOKEN）
 
 ### xtrace 现有能力
 

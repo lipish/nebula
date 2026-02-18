@@ -9,7 +9,7 @@ struct Args {
     database_url: String,
 
     /// Bearer token for API authentication
-    #[arg(long, env = "XTRACE_TOKEN", default_value = "")]
+    #[arg(long, env = "OBSERVE_TOKEN", default_value = "")]
     token: String,
 
     /// Bind address for the HTTP server

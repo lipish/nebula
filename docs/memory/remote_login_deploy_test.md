@@ -49,7 +49,7 @@ cp -f deploy/nebula.env.example deploy/nebula.env
 把 xtrace token 写入 `deploy/nebula.env`：
 
 ```bash
-XTRACE_TOKEN=$(grep -E '^API_BEARER_TOKEN=' ~/github/xtrace/.env | head -n1 | cut -d= -f2-)
+OBSERVE_TOKEN=$(grep -E '^API_BEARER_TOKEN=' ~/github/xtrace/.env | head -n1 | cut -d= -f2-)
 
 cat > ~/github/nebula/deploy/nebula.env <<EOF
 ETCD_ENDPOINT=http://127.0.0.1:2379
@@ -61,13 +61,16 @@ NODE_ID=node_gpu0
 MODEL_UID=qwen2_5_0_5b
 MODEL_NAME=Qwen/Qwen2.5-0.5B-Instruct
 START_BFF=1
-XTRACE_URL=http://127.0.0.1:8742
-XTRACE_AUTH_MODE=service
-XTRACE_TOKEN=$XTRACE_TOKEN
+BFF_DATABASE_URL=postgresql://<nebula_user>:<nebula_pass>@127.0.0.1:5432/nebula
+OBSERVE_URL=http://127.0.0.1:8742
+OBSERVE_AUTH_MODE=service
+OBSERVE_TOKEN=$OBSERVE_TOKEN
 EOF
 
 chmod 600 ~/github/nebula/deploy/nebula.env
 ```
+
+注意：BFF 的 `BFF_DATABASE_URL` 必须是 Nebula 独立数据库（`/nebula`）；xtrace/observe 使用独立数据库（`/observe`）。
 
 ## 4) 远端编译与重启
 
@@ -131,12 +134,12 @@ protoc --version
 
 ### D. `{"message":"Unauthorized"}`（Audit Logs）
 
-这是高频问题，通常是 `XTRACE_TOKEN` 缺失或未生效：
+这是高频问题，通常是 `OBSERVE_TOKEN` 缺失或未生效：
 
 ```bash
 # 1) 对齐 token
 TOKEN=$(grep -E '^API_BEARER_TOKEN=' ~/github/xtrace/.env | head -n1 | cut -d= -f2-)
-sed -i "s|^XTRACE_TOKEN=.*$|XTRACE_TOKEN=${TOKEN}|" ~/github/nebula/deploy/nebula.env
+sed -i "s|^OBSERVE_TOKEN=.*$|OBSERVE_TOKEN=${TOKEN}|" ~/github/nebula/deploy/nebula.env
 
 # 2) 重启
 cd ~/github/nebula

@@ -57,9 +57,9 @@ services:
       NEBULA_BFF_ADDR: 0.0.0.0:18090
       NEBULA_AUTH_TOKENS: "devtoken:admin,viewtoken:viewer"
       BFF_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/nebula
-      XTRACE_URL: ${XTRACE_URL:-http://host.docker.internal:8742}
-      XTRACE_AUTH_MODE: ${XTRACE_AUTH_MODE:-internal}
-      XTRACE_TOKEN: ${XTRACE_TOKEN:-}
+      OBSERVE_URL: ${OBSERVE_URL:-http://host.docker.internal:8742}
+      OBSERVE_AUTH_MODE: ${OBSERVE_AUTH_MODE:-internal}
+      OBSERVE_TOKEN: ${OBSERVE_TOKEN:-}
     ports:
       - "18090:18090"
     depends_on:
@@ -98,26 +98,26 @@ services:
         condition: service_healthy
 
   xtrace:
-    image: ${XTRACE_IMAGE:-ghcr.io/lipish/xtrace:latest}
+    image: ${OBSERVE_IMAGE:-ghcr.io/lipish/xtrace:latest}
     profiles:
       - observe
     environment:
-      DATABASE_URL: ${XTRACE_DATABASE_URL:-postgresql://ai:xtrace123@host.docker.internal:5432/xtrace}
-      API_BEARER_TOKEN: ${XTRACE_TOKEN:-}
+      DATABASE_URL: ${OBSERVE_DATABASE_URL:-postgresql://ai:xtrace123@host.docker.internal:5432/observe}
+      API_BEARER_TOKEN: ${OBSERVE_TOKEN:-}
     ports:
       - "8742:8742"
 
-# BFF/xtrace auth mode recommendation:
-# - dev:  XTRACE_AUTH_MODE=internal
-# - prod: XTRACE_AUTH_MODE=service and set XTRACE_TOKEN
+# BFF/observe auth mode recommendation:
+# - dev:  OBSERVE_AUTH_MODE=internal
+# - prod: OBSERVE_AUTH_MODE=service and set OBSERVE_TOKEN
 #
 # For production-like compose deployment, prefer:
-#   XTRACE_AUTH_MODE=service
-#   XTRACE_TOKEN=<internal-service-token>
-# and set XTRACE_URL to your xtrace endpoint.
+#   OBSERVE_AUTH_MODE=service
+#   OBSERVE_TOKEN=<internal-service-token>
+# and set OBSERVE_URL to your xtrace endpoint.
 #
 # To run xtrace inside compose, enable profile "observe" and point BFF to it:
-#   XTRACE_URL=http://xtrace:8742 docker compose --profile observe up -d --build
+#   OBSERVE_URL=http://xtrace:8742 docker compose --profile observe up -d --build
 
 # NOTE: nebula-node and vLLM are not included in compose because they require
 # GPU access and model files. Run them on GPU hosts directly.

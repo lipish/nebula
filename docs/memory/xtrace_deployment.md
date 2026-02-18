@@ -6,7 +6,7 @@ xtrace 服务已部署在远程服务器 10.21.11.92:8742。
 
 - **二进制**：~/github/xtrace/target/release/xtrace
 - **配置**：~/github/xtrace/.env
-- **DATABASE_URL**：postgresql://ai:xtrace123@127.0.0.1:5432/xtrace
+- **DATABASE_URL**：postgresql://ai:xtrace123@127.0.0.1:5432/observe
 - **API_BEARER_TOKEN**：nebula-xtrace-token-2026
 - **BIND_ADDR**：0.0.0.0:8742
 
