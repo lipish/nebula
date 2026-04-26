@@ -114,20 +114,25 @@ async fn main() -> anyhow::Result<()> {
                 start_rev = rev;
             }
 
-            if let Ok(plan) = serde_json::from_slice::<PlacementPlan>(&val) {
-                let assigned = plan.assignments.iter().any(|a| a.node_id == args.node_id);
-                if assigned {
-                    tracing::info!(model=%plan.model_uid, "found existing assignment");
-                    let mid = plan.model_uid.clone();
-                    let _ = reconcile_model(
-                        &store,
-                        &args,
-                        &mut *running.lock().await,
-                        &endpoint_state,
-                        &mid,
-                        Some(plan),
-                    )
-                    .await;
+            match serde_json::from_slice::<PlacementPlan>(&val) {
+                Ok(plan) => {
+                    let assigned = plan.assignments.iter().any(|a| a.node_id == args.node_id);
+                    if assigned {
+                        tracing::info!(model=%plan.model_uid, "found existing assignment");
+                        let mid = plan.model_uid.clone();
+                        let _ = reconcile_model(
+                            &store,
+                            &args,
+                            &mut *running.lock().await,
+                            &endpoint_state,
+                            &mid,
+                            Some(plan),
+                        )
+                        .await;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(key=%_key, error=%e, "failed to deserialize placement plan");
                 }
             }
         }
@@ -168,11 +173,11 @@ async fn main() -> anyhow::Result<()> {
                 None => {
                     let key = ev.key;
                     let model_uid = key.strip_prefix(prefix).unwrap_or(&key);
-                    tracing::info!(model=%model_uid, "placement deleted event");
-                    let model_uid = model_uid.to_string();
-                    if running.lock().await.contains_key(&model_uid) {
-                        tracing::info!(%model_uid, "stopping model due to deletion");
-                        reconcile_model(
+                    
+                    if running.lock().await.contains_key(model_uid) {
+                        tracing::info!(model=%model_uid, "placement deleted event affecting local node");
+                        let model_uid = model_uid.to_string();
+                        let _ = reconcile_model(
                             &store,
                             &args,
                             &mut *running.lock().await,
@@ -180,7 +185,9 @@ async fn main() -> anyhow::Result<()> {
                             &model_uid,
                             None,
                         )
-                        .await?;
+                        .await;
+                    } else {
+                        tracing::debug!(model=%model_uid, "ignoring placement deletion for non-local model");
                     }
                 }
             }

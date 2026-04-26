@@ -731,7 +731,7 @@ export function LoadModelDialog({
                             <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{t('models.engine')}</label>
                             <div className="flex gap-2">
                                 <div className="flex rounded-xl border border-border overflow-hidden">
-                                    {["vllm", "sglang"].map((eng) => (
+                                    {["vllm", "sglang", "virtual"].map((eng) => (
                                         <button
                                             key={eng}
                                             onClick={() => handleEngineChange(eng)}
@@ -742,7 +742,7 @@ export function LoadModelDialog({
                                                     : "bg-transparent text-muted-foreground hover:bg-accent"
                                             )}
                                         >
-                                            {eng === "vllm" ? "vLLM" : "SGLang"}
+                                            {eng === "vllm" ? "vLLM" : eng === "sglang" ? "SGLang" : "Virtual"}
                                         </button>
                                     ))}
                                 </div>
@@ -761,9 +761,14 @@ export function LoadModelDialog({
                                     </select>
                                 )}
                             </div>
-                            {imagesForEngine.length === 0 && (
+                            {form.engine_type !== 'virtual' && imagesForEngine.length === 0 && (
                                 <p className="text-[10px] text-muted-foreground/70">
                                     {t('loadDialog.noRegisteredImages', { engine: form.engine_type === 'vllm' ? 'vLLM' : 'SGLang' })}
+                                </p>
+                            )}
+                            {form.engine_type === 'virtual' && (
+                                <p className="text-[10px] text-muted-foreground/70">
+                                    Virtual engine proxies requests to an external LLM service. Ensure VIRTUAL_ENGINE_TARGET is set on the target node.
                                 </p>
                             )}
                         </div>

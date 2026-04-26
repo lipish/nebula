@@ -1436,6 +1436,7 @@ name = "nebula-gateway"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "bytes",
  "chrono",
@@ -1452,6 +1453,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
+ "unigateway",
  "uuid",
 ]
 
@@ -1486,8 +1488,11 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "unigateway",
+ "unigateway-sdk",
  "xtrace-client",
 ]
 
@@ -1525,6 +1530,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
+ "unigateway",
  "uuid",
  "xtrace-client",
 ]
@@ -3027,6 +3033,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
@@ -3335,6 +3342,77 @@ name = "unicode-properties"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7df058c713841ad818f1dc5d3fd88063241cc61f49f5fbea4b951e8cf5a8d71d"
+
+[[package]]
+name = "unigateway"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95e2fd7633b42412497b39b4011417c8af4e5c8e2878238af2453e92a6e982b7"
+dependencies = [
+ "unigateway-sdk",
+]
+
+[[package]]
+name = "unigateway-core"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d83c545155a45f675c7bb9825ad93e70c0f03e5de704f62b304a7efdccfd522"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "unigateway-host"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49184d67b727cd61ae5da9c0039ad4196d3661931cc77d23f23c05e372a30015"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures-util",
+ "http",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "unigateway-core",
+ "unigateway-protocol",
+]
+
+[[package]]
+name = "unigateway-protocol"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d92df74862633eeba5a39d43a20b6cf636cf31757ec57a733f4edf7279df6895"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures-util",
+ "http",
+ "serde",
+ "serde_json",
+ "tokio",
+ "unigateway-core",
+]
+
+[[package]]
+name = "unigateway-sdk"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17fef9e1f10e01bf44aa768786adb4c415f93d8319bb88f38aa2262cffd1b75b"
+dependencies = [
+ "unigateway-core",
+ "unigateway-host",
+ "unigateway-protocol",
+]
 
 [[package]]
 name = "untrusted"
@@ -3884,9 +3962,9 @@ dependencies = [
 
 [[package]]
 name = "xtrace-client"
-version = "0.0.9"
+version = "0.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ec1c4c93fe1567a0c8664f85eab5dc0bcf4d30ecda1ee6074df96484acda8a3"
+checksum = "3e419298c3c7e9a4ded19b0909e79b73b5078d4ac9a36973d3abf1470186dd23"
 dependencies = [
  "chrono",
  "reqwest",

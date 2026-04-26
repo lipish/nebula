@@ -343,30 +343,40 @@ impl Router {
             .iter()
             .filter(|e| {
                 let ep = e.value();
-                if ep.model_uid != model_uid || ep.status != EndpointStatus::Ready {
+                if ep.model_uid != model_uid {
+                    tracing::debug!(model_uid=%ep.model_uid, "endpoint filtered: uid mismatch");
+                    return false;
+                }
+                if ep.status != EndpointStatus::Ready {
+                    tracing::debug!(model_uid=%ep.model_uid, replica_id=%ep.replica_id, status=?ep.status, "endpoint filtered: not ready");
                     return false;
                 }
                 if self.is_endpoint_circuit_open(&ep.model_uid, ep.replica_id) {
+                    tracing::debug!(model_uid=%ep.model_uid, replica_id=%ep.replica_id, "endpoint filtered: circuit open");
                     self.route_circuit_skipped_total
                         .fetch_add(1, Ordering::Relaxed);
                     return false;
                 }
                 if let Some(required_plan_version) = plan_version {
                     if ep.plan_version != required_plan_version {
+                        tracing::debug!(model_uid=%ep.model_uid, replica_id=%ep.replica_id, plan_version=%ep.plan_version, required=%required_plan_version, "endpoint filtered: plan version mismatch");
                         return false;
                     }
                 }
                 if let Some((exclude_model_uid, exclude_replica_id)) = exclude {
                     if ep.model_uid == exclude_model_uid && ep.replica_id == exclude_replica_id {
+                        tracing::debug!(model_uid=%ep.model_uid, replica_id=%ep.replica_id, "endpoint filtered: excluded");
                         return false;
                     }
                 }
+                tracing::debug!(model_uid=%ep.model_uid, replica_id=%ep.replica_id, "endpoint accepted as candidate");
                 true
             })
             .map(|e| e.value().clone())
             .collect();
 
         if filtered.is_empty() {
+            tracing::warn!(model_uid=%model_uid, total_endpoints=self.endpoints.len(), "no endpoints passed filters");
             return Err(RouteError::NoEndpoint);
         }
 
