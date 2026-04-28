@@ -124,8 +124,7 @@ pub async fn proxy_chat_completions(
             // Resolve model_name → model_uid (or pass through if already a uid)
             let model_uid = st.router.resolve_model(&raw_model);
 
-            // Rewrite the body's "model" field to model_name so vLLM sees the
-            // HuggingFace model name it expects (e.g. "Qwen/Qwen2.5-0.5B-Instruct")
+            // Rewrite the body's "model" field using serde_json::Value
             let body_bytes = {
                 let model_name = st.router.get_model_name(&model_uid)
                     .unwrap_or_else(|| raw_model.clone());

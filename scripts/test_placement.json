@@ -1,0 +1,14 @@
+{
+  "model_uid": "virtual-deepseek-test",
+  "model_name": "deepseek-v3",
+  "version": 1,
+  "assignments": [
+    {
+      "node_id": "local-node",
+      "replica_id": 0,
+      "port": 8080,
+      "engine_type": "virtual",
+      "docker_image": null
+    }
+  ]
+}

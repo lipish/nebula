@@ -6,6 +6,16 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-28
+
+### Changed
+- Reorganized project structure: moved test and debug scripts from root to `scripts/`.
+- Renamed long documentation filenames to more concise alternatives.
+- Configured `etcd` in `bin/nebula-up.sh` to use a temporary data directory (`/tmp/nebula-etcd`) instead of the project root.
+
+### Added
+- Added `AGENTS.md` to define project organization rules for AI agents and developers.
+
 ## [2026-02-15]
 
 ### Added

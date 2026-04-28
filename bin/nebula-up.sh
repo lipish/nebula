@@ -74,7 +74,9 @@ if pgrep -x "etcd" > /dev/null; then
     echo "Etcd is already running."
 else
     echo "Starting Etcd..."
-    nohup ~/bin/etcd --advertise-client-urls http://0.0.0.0:2379 --listen-client-urls http://0.0.0.0:2379 > "$LOG_DIR/etcd.log" 2>&1 &
+    ETCD_DATA_DIR="/tmp/nebula-etcd"
+    mkdir -p "$ETCD_DATA_DIR"
+    nohup ~/bin/etcd --data-dir "$ETCD_DATA_DIR" --advertise-client-urls http://0.0.0.0:2379 --listen-client-urls http://0.0.0.0:2379 > "$LOG_DIR/etcd.log" 2>&1 &
     sleep 2
 fi
 

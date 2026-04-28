@@ -271,16 +271,24 @@ async fn reconcile_once(store: &EtcdMetaStore, default_port: u16, xtrace: Option
         };
 
         let placement_key = format!("/placements/{}", plan.model_uid);
+        
+        // Find the revision of the plan we originally read
+        let expected_revision = placement_kvs.iter()
+            .find(|(key, _, _)| key == &placement_key)
+            .map(|(_, _, revision)| *revision)
+            .unwrap_or(0);
+
         match serde_json::to_vec(&updated_plan) {
             Ok(val) => {
-                if let Err(e) = store.put(&placement_key, val, None).await {
-                    warn!(model_uid=%plan.model_uid, error=%e, "failed to write updated placement");
+                // Use CAS: ensure the key has not been modified since we read it
+                if let Err(e) = store.compare_and_swap(&placement_key, expected_revision, val).await {
+                    warn!(model_uid=%plan.model_uid, error=%e, "reconcile: CAS update failed, skipping cycle");
                 } else {
                     info!(
                         model_uid=%plan.model_uid,
                         old_assignments=plan.assignments.len(),
                         new_assignments=updated_plan.assignments.len(),
-                        "reconcile: updated placement"
+                        "reconcile: updated placement (CAS)"
                     );
                 }
             }
