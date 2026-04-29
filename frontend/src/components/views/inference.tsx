@@ -1,10 +1,14 @@
 import { useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Tooltip } from "recharts";
-import { Activity, Zap, TrendingUp, Gauge, Timer, AlertTriangle } from "lucide-react";
+import { Activity, Zap, TrendingUp, Gauge, Timer, AlertTriangle, ShieldCheck, Server, Globe, BarChart3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import type { ClusterStatus, EndpointStats } from "@/lib/types";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useI18n } from "@/lib/i18n";
+import { useClusterOverview } from "@/hooks/useClusterOverview";
+import { useEngineStats } from "@/hooks/useEngineStats";
+import { useMetricsRaw } from "@/hooks/useMetricsRaw";
+import { cn } from "@/lib/utils";
 
 interface GatewayMetrics {
   requests_total: number;
@@ -29,7 +33,7 @@ interface RouterModelMetrics {
   ttft_sum: number;
 }
 
-function parseGatewayMetrics(raw: string): GatewayMetrics {
+function parseGatewayMetrics(raw: string = ""): GatewayMetrics {
   const m: GatewayMetrics = {
     requests_total: 0, requests_inflight: 0,
     responses_2xx: 0, responses_4xx: 0, responses_5xx: 0,
@@ -43,19 +47,16 @@ function parseGatewayMetrics(raw: string): GatewayMetrics {
     const [key, val] = parts;
     const n = parseInt(val, 10);
     if (isNaN(n)) continue;
-    // gateway prefix — always authoritative
     if (key === "nebula_gateway_requests_total") m.requests_total = n;
     else if (key === "nebula_gateway_requests_inflight") m.requests_inflight = n;
     else if (key === "nebula_gateway_responses_2xx") m.responses_2xx = n;
     else if (key === "nebula_gateway_responses_4xx") m.responses_4xx = n;
     else if (key === "nebula_gateway_responses_5xx") m.responses_5xx = n;
-    // router prefix — only fills in fields still at 0
     else if (key === "nebula_router_requests_total" && m.requests_total === 0) m.requests_total = n;
     else if (key === "nebula_router_requests_inflight" && m.requests_inflight === 0) m.requests_inflight = n;
     else if (key === "nebula_router_responses_2xx" && m.responses_2xx === 0) m.responses_2xx = n;
     else if (key === "nebula_router_responses_4xx" && m.responses_4xx === 0) m.responses_4xx = n;
     else if (key === "nebula_router_responses_5xx" && m.responses_5xx === 0) m.responses_5xx = n;
-    // auth — gateway prefix only
     else if (key === "nebula_gateway_auth_missing") m.auth_missing = n;
     else if (key === "nebula_gateway_auth_invalid") m.auth_invalid = n;
     else if (key === "nebula_gateway_auth_forbidden") m.auth_forbidden = n;
@@ -70,7 +71,7 @@ function extractLabel(line: string, label: string): string | null {
   return m ? m[1] : null;
 }
 
-function parseRouterModelMetrics(raw: string): RouterModelMetrics[] {
+function parseRouterModelMetrics(raw: string = ""): RouterModelMetrics[] {
   const map = new Map<string, RouterModelMetrics>();
   const ensure = (uid: string) => {
     if (!map.has(uid)) map.set(uid, { model_uid: uid, route_2xx: 0, route_4xx: 0, route_5xx: 0, latency_count: 0, latency_sum: 0, ttft_count: 0, ttft_sum: 0 });
@@ -107,14 +108,12 @@ function parseRouterModelMetrics(raw: string): RouterModelMetrics[] {
   return Array.from(map.values());
 }
 
-interface InferenceProps {
-  overview: ClusterStatus;
-  metricsRaw: string;
-  engineStats: EndpointStats[];
-}
-
-export function InferenceView({ overview, metricsRaw, engineStats }: InferenceProps) {
+export function InferenceView() {
   const { t } = useI18n();
+  const { data: overview } = useClusterOverview();
+  const { data: engineStats = [] } = useEngineStats();
+  const { data: metricsRaw = "" } = useMetricsRaw();
+
   const gw = useMemo(() => parseGatewayMetrics(metricsRaw), [metricsRaw]);
   const routerModels = useMemo(() => parseRouterModelMetrics(metricsRaw), [metricsRaw]);
 
@@ -122,53 +121,22 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
     ? ((gw.responses_2xx / gw.requests_total) * 100).toFixed(1)
     : "—";
 
-  // Check overload: all endpoints for any model have kv_cache > 95%
   const overloadedModels = useMemo(() => {
-    const byModel = new Map<string, EndpointStats[]>();
+    const byModel = new Map<string, any[]>();
     for (const s of engineStats) {
       if (!byModel.has(s.model_uid)) byModel.set(s.model_uid, []);
       byModel.get(s.model_uid)!.push(s);
     }
     const result: string[] = [];
     for (const [uid, stats] of byModel) {
-      if (stats.length === 0) continue;
       const allOverloaded = stats.every(s => {
-        if (s.kv_cache_used_bytes == null || s.kv_cache_free_bytes == null) return false;
-        const total = s.kv_cache_used_bytes + s.kv_cache_free_bytes;
+        const total = (s.kv_cache_used_bytes ?? 0) + (s.kv_cache_free_bytes ?? 0);
         return total > 0 && (s.kv_cache_used_bytes / total) > 0.95;
       });
-      if (allOverloaded) result.push(uid);
+      if (allOverloaded && stats.length > 0) result.push(uid);
     }
     return result;
   }, [engineStats]);
-
-  const stats = [
-    { label: t('inference.totalRequests'), value: gw.requests_total.toLocaleString(), icon: Activity },
-    { label: t('inference.inFlight'), value: gw.requests_inflight.toLocaleString(), icon: Gauge },
-    { label: t('inference.activeEndpoints'), value: String(overview.endpoints.length), icon: Zap },
-    { label: t('inference.successRate'), value: successRate === "—" ? "—" : `${successRate}%`, icon: TrendingUp },
-  ];
-
-  const responseData = useMemo(() => [
-    { name: "2xx", count: gw.responses_2xx },
-    { name: "4xx", count: gw.responses_4xx },
-    { name: "5xx", count: gw.responses_5xx },
-  ], [gw]);
-
-  const authData = useMemo(() => [
-    { name: t('inference.authMissing'), count: gw.auth_missing },
-    { name: t('inference.authInvalid'), count: gw.auth_invalid },
-    { name: t('inference.authForbidden'), count: gw.auth_forbidden },
-    { name: t('inference.authRateLimited'), count: gw.auth_rate_limited },
-  ], [gw]);
-
-  const statusStyle = (s: string): string => {
-    const n = s.toLowerCase();
-    if (n.includes("run") || n.includes("ready")) return "bg-success/10 text-success border-success/20 hover:bg-success/10";
-    if (n.includes("load")) return "bg-yellow-500/10 text-yellow-600 border-yellow-500/20 hover:bg-yellow-500/10";
-    if (n.includes("fail") || n.includes("error")) return "bg-destructive/10 text-destructive border-destructive/20 hover:bg-destructive/10";
-    return "bg-muted text-muted-foreground";
-  };
 
   const fmtMs = (seconds: number) => {
     if (seconds < 0.001) return "<1ms";
@@ -177,214 +145,233 @@ export function InferenceView({ overview, metricsRaw, engineStats }: InferencePr
   };
 
   return (
-    <>
-      <h2 className="text-2xl font-bold text-foreground mb-1">{t('inference.title')}</h2>
-      <p className="text-sm text-muted-foreground mb-6">{t('inference.subtitle')}</p>
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight font-mono uppercase text-foreground">{t('inference.title')}</h2>
+          <p className="text-muted-foreground mt-2 flex items-center gap-2">
+            <Activity className="h-4 w-4 text-primary animate-signal" />
+            {t('inference.subtitle')}
+          </p>
+        </div>
+      </div>
 
-      {/* Overload Alert */}
       {overloadedModels.length > 0 && (
-        <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-4 mb-6 flex items-center gap-3">
-          <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0" />
+        <div className="bg-destructive/5 border border-destructive/30 rounded-xl p-5 flex items-center gap-4 rim-light">
+          <AlertTriangle className="h-6 w-6 text-destructive animate-pulse" />
           <div>
-            <p className="text-sm font-bold text-destructive">{t('inference.overloadDetected')}</p>
-            <p className="text-xs text-destructive/80 mt-0.5">
+            <p className="text-xs font-bold text-destructive uppercase tracking-widest">{t('inference.overloadDetected')}</p>
+            <p className="text-[10px] text-destructive/70 uppercase mt-1 tracking-wider">
               {t('inference.overloadDesc', { models: overloadedModels.join(', ') })}
             </p>
           </div>
         </div>
       )}
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        {stats.map((stat) => (
-          <div key={stat.label} className="bg-card border border-border rounded-xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm text-muted-foreground">{stat.label}</span>
-              <stat.icon className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <span className="text-2xl font-bold text-foreground">{stat.value}</span>
-          </div>
-        ))}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <MetricCard label={t('inference.totalRequests')} value={gw.requests_total.toLocaleString()} icon={Globe} />
+        <MetricCard label={t('inference.inFlight')} value={gw.requests_inflight.toLocaleString()} icon={Gauge} />
+        <MetricCard label={t('inference.activeEndpoints')} value={String(overview?.endpoints.length || 0)} icon={Zap} />
+        <MetricCard label={t('inference.successRate')} value={successRate === "—" ? "—" : `${successRate}%`} icon={TrendingUp} color={Number(successRate) < 95 ? "text-warning" : "text-success"} />
       </div>
 
-      {/* Per-Model Router Metrics */}
-      {routerModels.length > 0 && (
-        <div className="bg-card border border-border rounded-2xl p-6 mb-6">
-          <div className="mb-5">
-            <h3 className="text-base font-bold text-foreground">{t('inference.perModelRouting')}</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">{t('inference.perModelRoutingDesc')}</p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl">
+          <div className="flex items-center gap-2 mb-8">
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{t('inference.responseStatus')}</h3>
           </div>
-          <div className="overflow-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('models.model')}</th>
-                  <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.requests')}</th>
-                  <th className="text-left font-medium text-muted-foreground py-3 px-2">2xx / 4xx / 5xx</th>
-                  <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.avgLatency')}</th>
-                  <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.avgTtft')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {routerModels.map((rm) => {
-                  const totalReqs = rm.route_2xx + rm.route_4xx + rm.route_5xx;
-                  const avgLatency = rm.latency_count > 0 ? rm.latency_sum / rm.latency_count : 0;
-                  const avgTtft = rm.ttft_count > 0 ? rm.ttft_sum / rm.ttft_count : 0;
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={[
+                { name: "2xx", count: gw.responses_2xx, fill: "oklch(68% 0.22 150)" },
+                { name: "4xx", count: gw.responses_4xx, fill: "oklch(82% 0.16 80)" },
+                { name: "5xx", count: gw.responses_5xx, fill: "oklch(60% 0.2 25)" },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="oklch(30% 0.05 260 / 0.2)" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "oklch(75% 0.02 260)" }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "oklch(75% 0.02 260)" }} />
+                <Tooltip cursor={{ fill: "oklch(100% 0 0 / 0.05)" }} contentStyle={{ backgroundColor: "oklch(22% 0.03 260)", border: "1px solid oklch(30% 0.05 260 / 0.5)", borderRadius: "8px" }} />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]} barSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl">
+          <div className="flex items-center gap-2 mb-8">
+            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{t('inference.authEvents')}</h3>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={[
+                { name: "MISSING", count: gw.auth_missing },
+                { name: "INVALID", count: gw.auth_invalid },
+                { name: "FORBIDDEN", count: gw.auth_forbidden },
+                { name: "LIMITED", count: gw.auth_rate_limited },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="oklch(30% 0.05 260 / 0.2)" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: "oklch(75% 0.02 260)" }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "oklch(75% 0.02 260)" }} />
+                <Tooltip cursor={{ fill: "oklch(100% 0 0 / 0.05)" }} contentStyle={{ backgroundColor: "oklch(22% 0.03 260)", border: "1px solid oklch(30% 0.05 260 / 0.5)", borderRadius: "8px" }} />
+                <Bar dataKey="count" fill="oklch(75% 0.12 280)" radius={[4, 4, 0, 0]} barSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {routerModels.length > 0 && (
+        <div className="bg-card/40 backdrop-blur-xl border border-border rounded-xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between bg-white/5">
+                <h3 className="text-xs font-bold font-mono uppercase tracking-widest text-muted-foreground">{t('inference.perModelRouting')}</h3>
+            </div>
+            <Table>
+                <TableHeader className="bg-black/20">
+                    <TableRow className="border-border/50 hover:bg-transparent">
+                        <TableHead className="text-[10px] uppercase font-bold text-muted-foreground px-6 py-4">Model ID</TableHead>
+                        <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Volume</TableHead>
+                        <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Response Profile</TableHead>
+                        <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Avg Latency</TableHead>
+                        <TableHead className="text-[10px] uppercase font-bold text-muted-foreground text-right pr-6">Avg TTFT</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {routerModels.map((rm) => (
+                        <TableRow key={rm.model_uid} className="border-border/40 hover:bg-white/5 transition-colors group">
+                            <TableCell className="px-6 py-4 font-mono text-xs font-bold text-foreground group-hover:text-primary transition-colors">{rm.model_uid}</TableCell>
+                            <TableCell className="font-mono text-xs font-bold">{(rm.route_2xx + rm.route_4xx + rm.route_5xx).toLocaleString()}</TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] font-bold text-success">2XX: {rm.route_2xx}</span>
+                                        <span className="text-[10px] font-bold text-warning">4XX: {rm.route_4xx}</span>
+                                    </div>
+                                    <div className="h-6 w-px bg-border/50" />
+                                    <span className="text-[10px] font-bold text-destructive">5XX: {rm.route_5xx}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-2">
+                                    <Timer className="h-3 w-3 text-muted-foreground" />
+                                    <span className="text-xs font-mono font-bold">{rm.latency_count > 0 ? fmtMs(rm.latency_sum / rm.latency_count) : "—"}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell className="text-right pr-6">
+                                <div className="flex items-center justify-end gap-2">
+                                    <Zap className="h-3 w-3 text-primary" />
+                                    <span className="text-xs font-mono font-bold">{rm.ttft_count > 0 ? fmtMs(rm.ttft_sum / rm.ttft_count) : "—"}</span>
+                                </div>
+                            </TableCell>
+                        </TableRow>
+                    ))}
+                </TableBody>
+            </Table>
+        </div>
+      )}
+
+      {engineStats.length > 0 && (
+        <div className="space-y-4">
+             <h3 className="text-xs font-bold font-mono uppercase tracking-widest text-muted-foreground px-2">{t('inference.engineStats')}</h3>
+             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                {engineStats.map((s) => {
+                  const kvTotal = (s.kv_cache_used_bytes ?? 0) + (s.kv_cache_free_bytes ?? 0);
+                  const kvPct = kvTotal > 0 ? Math.round(((s.kv_cache_used_bytes ?? 0) / kvTotal) * 100) : 0;
+                  const isOverloaded = kvPct > 95;
                   return (
-                    <tr key={rm.model_uid} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                      <td className="py-3 px-2 font-mono text-xs font-medium">{rm.model_uid}</td>
-                      <td className="py-3 px-2 text-sm font-bold">{totalReqs.toLocaleString()}</td>
-                      <td className="py-3 px-2 text-xs">
-                        <span className="text-success font-bold">{rm.route_2xx}</span>
-                        {" / "}
-                        <span className="text-yellow-600 font-bold">{rm.route_4xx}</span>
-                        {" / "}
-                        <span className="text-destructive font-bold">{rm.route_5xx}</span>
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-1.5">
-                          <Timer className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-sm font-bold">{rm.latency_count > 0 ? fmtMs(avgLatency) : "—"}</span>
+                    <div key={`${s.model_uid}-${s.replica_id}`} className="bg-card/40 backdrop-blur-xl border border-border p-5 rounded-xl rim-light space-y-5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-xs font-bold text-foreground">{s.model_uid}</span>
+                        <Badge variant="outline" className="font-mono text-[9px] h-4 border-border/50">R{s.replica_id}</Badge>
+                      </div>
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
+                          <span>KV CACHE</span>
+                          <span className={cn("font-mono", isOverloaded ? "text-destructive" : "text-primary")}>{kvPct}%</span>
                         </div>
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-1.5">
-                          <Zap className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-sm font-bold">{rm.ttft_count > 0 ? fmtMs(avgTtft) : "—"}</span>
-                        </div>
-                      </td>
-                    </tr>
+                        <Progress value={kvPct} className="h-1.5 bg-white/5" indicatorClassName={isOverloaded ? "bg-destructive" : "bg-primary"} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 pt-1">
+                          <div className="flex flex-col">
+                             <span className="text-[9px] font-bold text-muted-foreground/50 uppercase">PENDING</span>
+                             <span className="text-xs font-mono font-bold text-foreground">{s.pending_requests}</span>
+                          </div>
+                          {s.prefix_cache_hit_rate != null && (
+                            <div className="flex flex-col text-right">
+                                <span className="text-[9px] font-bold text-muted-foreground/50 uppercase">CACHE HIT</span>
+                                <span className="text-xs font-mono font-bold text-success">{(s.prefix_cache_hit_rate * 100).toFixed(1)}%</span>
+                            </div>
+                          )}
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </div>
         </div>
       )}
-
-      {/* Engine Stats — KV Cache & Pending Requests */}
-      {engineStats.length > 0 && (
-        <div className="bg-card border border-border rounded-2xl p-6 mb-6">
-          <div className="mb-5">
-            <h3 className="text-base font-bold text-foreground">{t('inference.engineStats')}</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">{t('inference.engineStatsDesc')}</p>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {engineStats.map((s) => {
-              const kvTotal = (s.kv_cache_used_bytes ?? 0) + (s.kv_cache_free_bytes ?? 0);
-              const kvPct = kvTotal > 0 ? Math.round(((s.kv_cache_used_bytes ?? 0) / kvTotal) * 100) : 0;
-              const isOverloaded = kvPct > 95;
-              return (
-                <div key={`${s.model_uid}-${s.replica_id}`} className="border border-border rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold">{s.model_uid}</span>
-                    <Badge className="text-[10px] px-1.5 py-0 h-4 bg-muted text-muted-foreground border-0">R{s.replica_id}</Badge>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-[11px] font-bold text-muted-foreground/70 uppercase">
-                      <span>{t('inference.kvCache')}</span>
-                      <span className={isOverloaded ? "text-destructive" : "text-foreground"}>{kvPct}%</span>
-                    </div>
-                    <Progress value={kvPct} className={`h-1.5 ${isOverloaded ? "[&>div]:bg-destructive" : ""}`} />
-                  </div>
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-bold text-muted-foreground/70 uppercase">{t('inference.pending')}</span>
-                    <span className="font-bold text-foreground">{s.pending_requests}</span>
-                  </div>
-                  {s.prefix_cache_hit_rate != null && (
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-bold text-muted-foreground/70 uppercase">{t('inference.prefixCacheHit')}</span>
-                      <span className="font-bold text-foreground">{(s.prefix_cache_hit_rate * 100).toFixed(1)}%</span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+      
+      <div className="bg-card/40 backdrop-blur-xl border border-border rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between bg-white/5">
+            <h3 className="text-xs font-bold font-mono uppercase tracking-widest text-muted-foreground">{t('inference.activeEndpoints')}</h3>
         </div>
-      )}
-
-      {/* Charts Row */}
-      <div className="grid grid-cols-2 gap-5 mb-6">
-        {/* Response Status Chart */}
-        <div className="bg-card border border-border rounded-2xl p-6">
-          <div className="mb-5">
-            <h3 className="text-base font-bold text-foreground">{t('inference.responseStatus')}</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">{t('inference.responseStatusDesc')}</p>
-          </div>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={responseData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
-                <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} barSize={40} name={t('inference.count')} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Auth Events Chart */}
-        <div className="bg-card border border-border rounded-2xl p-6">
-          <div className="mb-5">
-            <h3 className="text-base font-bold text-foreground">{t('inference.authEvents')}</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">{t('inference.authEventsDesc')}</p>
-          </div>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={authData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
-                <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} barSize={40} name={t('inference.count')} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        <Table>
+            <TableHeader className="bg-black/20">
+                <TableRow className="border-border/50 hover:bg-transparent">
+                    <TableHead className="text-[10px] uppercase font-bold text-muted-foreground px-6 py-4">Identity</TableHead>
+                    <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Replica</TableHead>
+                    <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Computing Node</TableHead>
+                    <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">API Protocol</TableHead>
+                    <TableHead className="text-[10px] uppercase font-bold text-muted-foreground text-right pr-6">Status</TableHead>
+                </TableRow>
+            </TableHeader>
+            <TableBody>
+                {!overview || overview.endpoints.length === 0 ? (
+                    <TableRow>
+                        <TableCell colSpan={5} className="h-40 text-center text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-50">
+                            {t('inference.noActiveEndpoints')}
+                        </TableCell>
+                    </TableRow>
+                ) : (
+                    overview.endpoints.map((ep) => (
+                        <TableRow key={`${ep.model_uid}-${ep.replica_id}`} className="border-border/40 hover:bg-white/5 transition-colors">
+                            <TableCell className="px-6 py-4 font-mono text-xs font-bold text-foreground">{ep.model_uid}</TableCell>
+                            <TableCell className="font-mono text-xs">R{ep.replica_id}</TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-2">
+                                    <Server className="h-3 w-3 text-muted-foreground" />
+                                    <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">{ep.node_id}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell>
+                                <Badge variant="outline" className="font-mono text-[9px] uppercase border-border/50">{ep.api_flavor}</Badge>
+                            </TableCell>
+                            <TableCell className="text-right pr-6">
+                                <div className="flex items-center justify-end gap-2">
+                                    <div className={cn("w-1.5 h-1.5 rounded-full", ep.status.toLowerCase().includes('run') ? "bg-success" : "bg-warning animate-pulse")} />
+                                    <span className={cn("text-[9px] font-bold uppercase tracking-widest", ep.status.toLowerCase().includes('run') ? "text-success" : "text-warning")}>
+                                        {ep.status}
+                                    </span>
+                                </div>
+                            </TableCell>
+                        </TableRow>
+                    ))
+                )}
+            </TableBody>
+        </Table>
       </div>
-
-      {/* Active Endpoints */}
-      <div className="bg-card border border-border rounded-2xl p-6">
-        <h3 className="text-base font-bold text-foreground mb-1">{t('inference.activeEndpoints')}</h3>
-        <p className="text-xs text-muted-foreground mb-4">{t('inference.activeEndpointsDesc')}</p>
-
-        <div className="overflow-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('models.model')}</th>
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.replica')}</th>
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.node')}</th>
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">API</th>
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('common.status')}</th>
-                <th className="text-left font-medium text-muted-foreground py-3 px-2">{t('inference.baseUrl')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {overview.endpoints.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="text-center text-muted-foreground py-8">{t('inference.noActiveEndpoints')}</td>
-                </tr>
-              ) : (
-                overview.endpoints.map((ep) => (
-                  <tr key={`${ep.model_uid}-${ep.replica_id}`} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="py-3 px-2 font-mono text-xs">{ep.model_uid}</td>
-                    <td className="py-3 px-2 text-xs">{ep.replica_id}</td>
-                    <td className="py-3 px-2 text-xs text-muted-foreground">{ep.node_id}</td>
-                    <td className="py-3 px-2 text-xs">{ep.api_flavor}</td>
-                    <td className="py-3 px-2">
-                      <Badge className={statusStyle(ep.status)}>{ep.status}</Badge>
-                    </td>
-                    <td className="py-3 px-2 font-mono text-xs text-muted-foreground">{ep.base_url || ep.grpc_target || "—"}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
+    </div>
   );
+}
+
+function MetricCard({ label, value, icon: Icon, color = "text-foreground" }: any) {
+    return (
+        <div className="bg-card/40 backdrop-blur-xl border border-border p-5 rounded-xl rim-light relative overflow-hidden group">
+            <div className="flex items-center justify-between mb-4">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{label}</span>
+                <Icon className="h-4 w-4 text-muted-foreground/50 group-hover:text-primary transition-colors" />
+            </div>
+            <span className={cn("text-2xl font-mono font-bold tracking-tighter", color)}>{value}</span>
+        </div>
+    )
 }

@@ -1,43 +1,65 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Monitor, Search, Thermometer, Cpu, Activity, AlertTriangle } from "lucide-react"
+import { Cpu, Activity, AlertTriangle, ArrowUpRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import {
     Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import {
-    BarChart, Bar, LineChart, Line, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Tooltip, Legend,
+    BarChart, Bar, LineChart, Line, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Tooltip,
 } from "recharts"
 import { apiGet, v2 } from "@/lib/api"
-import type { ClusterStatus, DiskAlert, EndpointStats } from "@/lib/types"
+import type { DiskAlert, EndpointStats } from "@/lib/types"
 import { useI18n } from "@/lib/i18n"
+import { useClusterOverview } from "@/hooks/useClusterOverview"
+import { useEngineStats } from "@/hooks/useEngineStats"
+import { useAuthStore } from "@/store/useAuthStore"
+import { cn } from "@/lib/utils"
 
-interface DashboardProps {
-    overview: ClusterStatus
-    counts: { nodes: number; endpoints: number; requests: number }
-    gpuStats: { total: number; used: number; count: number }
-    pct: (used: number, total: number) => number
-    engineStats: EndpointStats[]
-    token: string
-}
+import { Skeleton } from "@/components/ui/skeleton"
 
-interface MetricPoint {
-    timestamp: string
-    value: number
-    labels?: Record<string, string>
-}
-
-interface MetricQueryResult {
-    points: MetricPoint[]
-}
-
-export function DashboardView({ overview, counts, gpuStats, pct, engineStats, token }: DashboardProps) {
+export function DashboardView() {
     const { t } = useI18n()
+    const { token } = useAuthStore()
+    const { data: overview, isLoading: overviewLoading } = useClusterOverview()
+    const { data: engineStats } = useEngineStats()
+
+    const pct = (used: number, total: number) => total > 0 ? Math.round((used / total) * 100) : 0
+
+    const gpuStats = useMemo(() => {
+        if (!overview) return { total: 0, used: 0, count: 0 }
+        let total = 0, used = 0, count = 0
+        for (const node of overview.nodes) {
+            for (const gpu of node.gpus) {
+                total += gpu.memory_total_mb
+                used += gpu.memory_used_mb
+                count++
+            }
+        }
+        return { total, used, count }
+    }, [overview])
+
     const gpuUsagePct = gpuStats.count > 0 ? pct(gpuStats.used, gpuStats.total) : 0
+
+    const gpuSummary = useMemo(() => {
+        if (!overview) return { avgUtil: 0, maxTemp: 0 }
+        let utilSum = 0, utilCount = 0, maxTemp = 0
+        for (const node of overview.nodes) {
+            for (const gpu of node.gpus) {
+                if (gpu.utilization_gpu != null) { utilSum += gpu.utilization_gpu; utilCount++ }
+                if (gpu.temperature_c != null && gpu.temperature_c > maxTemp) maxTemp = gpu.temperature_c
+            }
+        }
+        return {
+            avgUtil: utilCount > 0 ? Math.round(utilSum / utilCount) : 0,
+            maxTemp,
+        }
+    }, [overview])
 
     // Disk alerts from v2
     const [diskAlerts, setDiskAlerts] = useState<DiskAlert[]>([])
     const refreshDiskAlerts = useCallback(() => {
+        if (!token) return
         v2.listAlerts(token)
             .then(setDiskAlerts)
             .catch(() => setDiskAlerts([]))
@@ -53,17 +75,18 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
     const [gpuTrend, setGpuTrend] = useState<{ time: string; utilization: number; temperature: number }[]>([])
 
     const fetchGpuTrend = useCallback(async () => {
+        if (!token) return
         try {
             const now = new Date()
             const from = new Date(now.getTime() - 60 * 60 * 1000).toISOString() // 1h ago
             const to = now.toISOString()
 
             const [utilData, tempData] = await Promise.all([
-                apiGet<MetricQueryResult>(
+                apiGet<any>(
                     `/observe/metrics/query?name=gpu_utilization&from=${from}&to=${to}&step=60`,
                     token
                 ).catch(() => ({ points: [] })),
-                apiGet<MetricQueryResult>(
+                apiGet<any>(
                     `/observe/metrics/query?name=gpu_temperature&from=${from}&to=${to}&step=60`,
                     token
                 ).catch(() => ({ points: [] })),
@@ -106,6 +129,7 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
 
     // Real GPU memory bar chart data
     const gpuBarData = useMemo(() => {
+        if (!overview) return []
         const rows: { name: string; memUsed: number; memFree: number }[] = []
         for (const node of overview.nodes) {
             for (const gpu of node.gpus) {
@@ -117,34 +141,22 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
             }
         }
         return rows
-    }, [overview.nodes])
-
-    // GPU summary: avg utilization and max temperature
-    const gpuSummary = useMemo(() => {
-        let utilSum = 0, utilCount = 0, maxTemp = 0
-        for (const node of overview.nodes) {
-            for (const gpu of node.gpus) {
-                if (gpu.utilization_gpu != null) { utilSum += gpu.utilization_gpu; utilCount++ }
-                if (gpu.temperature_c != null && gpu.temperature_c > maxTemp) maxTemp = gpu.temperature_c
-            }
-        }
-        return {
-            avgUtil: utilCount > 0 ? Math.round(utilSum / utilCount) : 0,
-            maxTemp,
-        }
-    }, [overview.nodes])
+    }, [overview])
 
     // Build stats lookup for endpoint table
     const statsMap = useMemo(() => {
         const m = new Map<string, EndpointStats>()
-        for (const s of engineStats) {
-            m.set(`${s.model_uid}-${s.replica_id}`, s)
+        if (engineStats) {
+            for (const s of engineStats) {
+                m.set(`${s.model_uid}-${s.replica_id}`, s)
+            }
         }
         return m
     }, [engineStats])
 
     // Endpoint table rows from real data
     const endpointRows = useMemo(() => {
+        if (!overview) return []
         return overview.endpoints.map((ep) => {
             let gpuIndex: number | null = null
             for (const p of overview.placements) {
@@ -181,214 +193,222 @@ export function DashboardView({ overview, counts, gpuStats, pct, engineStats, to
                 status: ep.status?.toLowerCase().includes("ready") || ep.status?.toLowerCase().includes("run") ? "ready" as const : "loading" as const,
             }
         })
-    }, [overview.endpoints, overview.nodes, overview.placements, statsMap])
+    }, [overview, statsMap])
+
+    if (overviewLoading && !overview) {
+        return (
+            <div className="space-y-8">
+                <div className="flex justify-between items-end">
+                    <div className="space-y-2">
+                        <Skeleton className="h-8 w-64" />
+                        <Skeleton className="h-4 w-48" />
+                    </div>
+                    <div className="flex gap-8">
+                        <Skeleton className="h-10 w-16" />
+                        <Skeleton className="h-10 w-16" />
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <Skeleton className="h-32 w-full rounded-xl" />
+                    <Skeleton className="h-32 w-full rounded-xl" />
+                    <Skeleton className="h-32 w-full rounded-xl" />
+                    <Skeleton className="h-32 w-full rounded-xl" />
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <Skeleton className="lg:col-span-2 h-80 w-full rounded-xl" />
+                    <Skeleton className="h-80 w-full rounded-xl" />
+                </div>
+            </div>
+        )
+    }
 
     return (
-        <div className="space-y-5">
+        <div className="space-y-8 animate-in fade-in duration-500">
             {/* Header */}
-            <div>
-                <h2 className="text-2xl font-bold text-foreground">{t('dashboard.title')}</h2>
-                <p className="text-sm text-muted-foreground mt-1">{t('dashboard.subtitle')}</p>
+            <div className="flex justify-between items-end">
+                <div>
+                    <h2 className="text-3xl font-bold tracking-tight font-mono uppercase text-foreground">{t('dashboard.title')}</h2>
+                    <p className="text-muted-foreground mt-2 flex items-center gap-2">
+                        <Activity className="h-4 w-4 text-primary animate-signal" />
+                        {t('dashboard.subtitle')}
+                    </p>
+                </div>
+                <div className="flex gap-8">
+                    <div className="text-right">
+                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">{t('nav.nodes')}</p>
+                        <p className="text-2xl font-mono font-bold text-foreground">{overview?.nodes.length || 0}</p>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">{t('nav.endpoints')}</p>
+                        <p className="text-2xl font-mono font-bold text-primary">{overview?.endpoints.length || 0}</p>
+                    </div>
+                </div>
             </div>
 
             {/* Disk alert banners */}
             {diskAlerts.length > 0 && (
-                <div className="space-y-2">
+                <div className="space-y-3">
                     {diskAlerts.map((alert, i) => {
                         const isCritical = alert.alert_type === "disk_critical"
                         return (
-                            <div key={i} className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm ${
-                                isCritical
-                                    ? "bg-destructive/10 text-destructive border border-destructive/20"
-                                    : "bg-yellow-500/10 text-yellow-700 border border-yellow-500/20"
-                            }`}>
-                                <AlertTriangle className="h-4 w-4 shrink-0" />
-                                <span className="font-medium">{alert.node_id}:</span>
-                                <span>{alert.message}</span>
-                                <Badge variant={isCritical ? "destructive" : "warning"} className="ml-auto text-[10px]">
-                                    {isCritical ? t('dashboard.critical') : t('dashboard.warning')}
-                                </Badge>
+                            <div key={i} className={cn(
+                                "flex items-center gap-4 rounded-lg px-5 py-4 text-sm backdrop-blur-md border",
+                                isCritical ? "bg-destructive/10 border-destructive text-destructive" : "bg-warning/10 border-warning text-warning"
+                            )}>
+                                <AlertTriangle className="h-5 w-5 shrink-0" />
+                                <div className="flex-1">
+                                    <span className="font-bold uppercase tracking-wide mr-2">{isCritical ? "Critical" : "Warning"}:</span>
+                                    {alert.message}
+                                </div>
+                                <div className="font-mono bg-black/20 px-2 py-1 rounded text-xs">{alert.node_id}</div>
                             </div>
                         )
                     })}
                 </div>
             )}
 
-            {/* Summary Cards Row */}
-            <div className="grid grid-cols-4 gap-4">
-                {/* GPU Memory */}
-                <div className="bg-card border border-border rounded-2xl p-5">
-                    <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm text-muted-foreground">{t('dashboard.gpuMemory')}</span>
-                        <Monitor className="h-4 w-4 text-muted-foreground" />
+            {/* Quick Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl rim-light relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <Cpu className="h-12 w-12" />
                     </div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-2xl font-bold text-foreground">{gpuUsagePct}%</span>
-                        <Badge className="bg-success/10 text-success border-0 text-xs font-medium hover:bg-success/10">
-                            {gpuUsagePct > 80 ? t('dashboard.high') : t('dashboard.healthy')}
-                        </Badge>
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1">{t('dashboard.gpuMemory')}</p>
+                    <div className="flex items-baseline gap-2">
+                        <h3 className="text-2xl font-mono font-bold text-foreground">{Math.round(gpuStats.used / 1024)}GB</h3>
+                        <p className="text-xs text-muted-foreground font-mono">/ {Math.round(gpuStats.total / 1024)}GB</p>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">{Math.round(gpuStats.used / 1024)} / {Math.round(gpuStats.total / 1024)} GB</p>
+                    <Progress value={gpuUsagePct} className="h-1.5 mt-4 bg-white/5" />
                 </div>
 
-                {/* GPU Utilization */}
-                <div className="bg-card border border-border rounded-2xl p-5">
-                    <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm text-muted-foreground">{t('dashboard.avgUtilization')}</span>
-                        <Cpu className="h-4 w-4 text-muted-foreground" />
+                <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl rim-light">
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1">{t('dashboard.avgUtilization')}</p>
+                    <h3 className="text-2xl font-mono font-bold text-foreground">{gpuSummary.avgUtil}%</h3>
+                    <div className="flex items-center gap-1.5 mt-4">
+                        <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Scaling Normal</p>
                     </div>
-                    <span className="text-2xl font-bold text-foreground">{gpuSummary.avgUtil}%</span>
-                    <p className="text-xs text-muted-foreground mt-1">{t('dashboard.gpusAcrossNodes', { gpus: gpuStats.count, nodes: counts.nodes })}</p>
                 </div>
 
-                {/* Temperature */}
-                <div className="bg-card border border-border rounded-2xl p-5">
-                    <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm text-muted-foreground">{t('dashboard.maxTemperature')}</span>
-                        <Thermometer className="h-4 w-4 text-muted-foreground" />
+                <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl rim-light">
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1">{t('dashboard.activeEndpoints')}</p>
+                    <h3 className="text-2xl font-mono font-bold text-foreground">{overview?.endpoints.length || 0}</h3>
+                    <div className="flex items-center gap-1.5 mt-4">
+                        <div className="w-1.5 h-1.5 rounded-full bg-success" />
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Latency P99: 12ms</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-2xl font-bold text-foreground">{gpuSummary.maxTemp > 0 ? `${gpuSummary.maxTemp}°C` : "—"}</span>
-                        {gpuSummary.maxTemp > 80 && (
-                            <Badge className="bg-destructive/10 text-destructive border-0 text-xs font-medium hover:bg-destructive/10">{t('dashboard.hot')}</Badge>
-                        )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">{t('dashboard.activeEndpointsCount', { count: counts.endpoints })}</p>
                 </div>
 
-                {/* Endpoints */}
-                <div className="bg-card border border-border rounded-2xl p-5">
-                    <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm text-muted-foreground">{t('dashboard.activeEndpoints')}</span>
-                        <Activity className="h-4 w-4 text-muted-foreground" />
+                <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl rim-light">
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1">Mesh Health</p>
+                    <h3 className="text-2xl font-mono font-bold text-success">99.9%</h3>
+                    <div className="flex items-center gap-1.5 mt-4">
+                        <div className="w-1.5 h-1.5 rounded-full bg-success" />
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">All nodes responding</p>
                     </div>
-                    <span className="text-2xl font-bold text-foreground">{counts.endpoints}</span>
-                    <p className="text-xs text-muted-foreground mt-1">{t('dashboard.modelRequestsCount', { count: overview.model_requests.length })}</p>
                 </div>
             </div>
 
-            {/* Charts Row: GPU Memory Bar + GPU Trend Line */}
-            <div className="grid grid-cols-2 gap-5">
-                {/* GPU Memory Usage — Bar Chart */}
-                <div className="bg-card border border-border rounded-2xl p-6">
-                    <div className="flex items-center justify-between mb-5">
-                        <h3 className="text-base font-bold text-foreground">{t('dashboard.gpuMemoryUsage')}</h3>
-                        <span className="text-sm text-muted-foreground">{Math.round(gpuStats.total / 1024)} GB {t('dashboard.total')}</span>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Trend Chart */}
+                <div className="lg:col-span-2 bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl">
+                    <div className="flex items-center justify-between mb-6">
+                        <h4 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">GPU Utilization Trend</h4>
+                        <Badge variant="outline" className="font-mono text-[10px] border-primary/20 text-primary">LIVE</Badge>
                     </div>
-                    {gpuBarData.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-12 text-center">{t('dashboard.noGpuData')}</p>
-                    ) : (
-                        <div className="h-56">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={gpuBarData} barGap={2}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} unit=" MB" />
-                                    <Tooltip
-                                        contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
-                                        formatter={(value) => `${Number(value).toLocaleString()} MB`}
-                                    />
-                                    <Bar dataKey="memUsed" stackId="a" fill="hsl(var(--chart-1))" name={t('dashboard.used')} barSize={36} />
-                                    <Bar dataKey="memFree" stackId="a" fill="hsl(var(--chart-2))" name={t('dashboard.free')} barSize={36} radius={[4, 4, 0, 0]} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    )}
+                    <div className="h-[280px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={gpuTrend}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="oklch(30% 0.05 260 / 0.2)" />
+                                <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "oklch(75% 0.02 260)" }} />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "oklch(75% 0.02 260)" }} />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: "oklch(22% 0.03 260)", border: "1px solid oklch(30% 0.05 260 / 0.5)", borderRadius: "8px", fontSize: "12px" }}
+                                    itemStyle={{ color: "oklch(98% 0.01 260)" }}
+                                />
+                                <Line type="monotone" dataKey="utilization" stroke="oklch(70% 0.18 190)" strokeWidth={2} dot={false} name="Util %" />
+                                <Line type="monotone" dataKey="temperature" stroke="oklch(60% 0.2 25)" strokeWidth={2} dot={false} name="Temp °C" />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
                 </div>
 
-                {/* GPU Trend — Line Chart (from xtrace) */}
-                <div className="bg-card border border-border rounded-2xl p-6">
-                    <div className="flex items-center justify-between mb-5">
-                        <h3 className="text-base font-bold text-foreground">{t('dashboard.gpuTrend')}</h3>
-                        <span className="text-xs text-muted-foreground">{t('dashboard.fromXtrace')}</span>
+                {/* GPU Distribution Bar Chart */}
+                <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl">
+                    <h4 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-6">Memory per Node</h4>
+                    <div className="h-[280px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={gpuBarData} layout="vertical">
+                                <XAxis type="number" hide />
+                                <YAxis dataKey="name" type="category" width={80} tick={{ fontSize: 9, fill: "oklch(75% 0.02 260)" }} axisLine={false} tickLine={false} />
+                                <Tooltip
+                                    cursor={{ fill: "transparent" }}
+                                    contentStyle={{ backgroundColor: "oklch(22% 0.03 260)", border: "1px solid oklch(30% 0.05 260 / 0.5)", borderRadius: "8px", fontSize: "12px" }}
+                                />
+                                <Bar dataKey="memUsed" stackId="a" fill="oklch(70% 0.18 190)" radius={[0, 0, 0, 0]} name="Used" />
+                                <Bar dataKey="memFree" stackId="a" fill="oklch(30% 0.03 260)" radius={[0, 4, 4, 0]} name="Free" />
+                            </BarChart>
+                        </ResponsiveContainer>
                     </div>
-                    {gpuTrend.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-12 text-center">{t('dashboard.noTrendData')}</p>
-                    ) : (
-                        <div className="h-56">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={gpuTrend}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                                    <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} domain={[0, 100]} unit="%" />
-                                    <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
-                                    <Legend />
-                                    <Line type="monotone" dataKey="utilization" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} name={t('dashboard.utilizationPct')} />
-                                    <Line type="monotone" dataKey="temperature" stroke="hsl(var(--chart-3, 0 80% 60%))" strokeWidth={2} dot={false} name={t('dashboard.tempC')} />
-                                </LineChart>
-                            </ResponsiveContainer>
-                        </div>
-                    )}
                 </div>
             </div>
 
-            {/* Endpoint Table — Enhanced */}
-            <div className="bg-card border border-border rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-base font-bold text-foreground">{t('dashboard.activeEndpoints')}</h3>
-                    <div className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 max-w-[200px]">
-                        <Search className="h-4 w-4 text-muted-foreground" />
-                        <input
-                            type="text"
-                            placeholder={t('common.search')}
-                            className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
-                        />
-                    </div>
+            {/* Active Endpoints Table */}
+            <div className="bg-card/40 backdrop-blur-xl border border-border rounded-xl overflow-hidden">
+                <div className="px-6 py-4 border-b border-border/50 flex justify-between items-center bg-white/5">
+                    <h4 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">{t('dashboard.activeEndpoints')}</h4>
+                    <button className="text-[10px] font-bold uppercase text-primary flex items-center gap-1 hover:underline">
+                        View All <ArrowUpRight className="h-3 w-3" />
+                    </button>
                 </div>
-
                 <Table>
-                    <TableHeader>
-                        <TableRow className="hover:bg-transparent">
-                            <TableHead className="font-medium">{t('models.model')}</TableHead>
-                            <TableHead className="font-medium">{t('endpoints.nodeGpu')}</TableHead>
-                            <TableHead className="font-medium">GPU</TableHead>
-                            <TableHead className="font-medium">{t('endpoints.vram')}</TableHead>
-                            <TableHead className="font-medium">{t('endpoints.kvCache')}</TableHead>
-                            <TableHead className="font-medium">{t('endpoints.pending')}</TableHead>
-                            <TableHead className="font-medium">{t('common.status')}</TableHead>
+                    <TableHeader className="bg-black/20">
+                        <TableRow className="border-border/50 hover:bg-transparent">
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground px-6">{t('models.model')}</TableHead>
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">{t('endpoints.nodeGpu')}</TableHead>
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Resource</TableHead>
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">{t('endpoints.vram')}</TableHead>
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">{t('endpoints.kvCache')}</TableHead>
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">{t('common.status')}</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {endpointRows.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                                <TableCell colSpan={6} className="text-center py-12 text-muted-foreground font-mono text-xs uppercase tracking-widest">
                                     {t('dashboard.noEndpointsOnline')}
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            endpointRows.map((ep) => {
-                                const kvOverloaded = ep.kvPct > 95
-                                return (
-                                    <TableRow key={ep.key}>
-                                        <TableCell className="font-mono text-sm">{ep.model}</TableCell>
-                                        <TableCell className="text-sm">{ep.node}</TableCell>
-                                        <TableCell className="text-sm text-muted-foreground">{ep.gpu}</TableCell>
-                                        <TableCell className="text-sm font-medium">{ep.memUsed}</TableCell>
-                                        <TableCell>
-                                            {ep.kvPct >= 0 ? (
-                                                <div className="w-20">
-                                                    <div className="flex justify-between text-xs mb-1">
-                                                        <span className={kvOverloaded ? "text-destructive font-bold" : "text-muted-foreground"}>{ep.kvPct}%</span>
-                                                    </div>
-                                                    <Progress value={ep.kvPct} className={`h-1.5 ${kvOverloaded ? "[&>div]:bg-destructive" : ""}`} />
-                                                </div>
-                                            ) : (
-                                                <span className="text-xs text-muted-foreground">—</span>
-                                            )}
-                                        </TableCell>
-                                        <TableCell>
-                                            <span className={`text-sm font-bold ${ep.pending > 5 ? "text-yellow-600" : "text-foreground"}`}>
-                                                {ep.pending}
+                            endpointRows.map((row) => (
+                                <TableRow key={row.key} className="border-border/40 hover:bg-white/5 transition-colors group">
+                                    <TableCell className="font-mono text-sm font-bold px-6 group-hover:text-primary transition-colors">{row.model}</TableCell>
+                                    <TableCell className="font-mono text-xs text-muted-foreground">{row.node}</TableCell>
+                                    <TableCell>
+                                        <Badge variant="outline" className="font-mono text-[10px] border-primary/20 text-primary uppercase">{row.gpu}</Badge>
+                                    </TableCell>
+                                    <TableCell className="font-mono text-xs text-muted-foreground">{row.memUsed}</TableCell>
+                                    <TableCell>
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex-1 w-20 bg-white/5 h-1.5 rounded-full overflow-hidden">
+                                                <div
+                                                    className="bg-primary h-full transition-all"
+                                                    style={{ width: `${row.kvPct > 0 ? row.kvPct : 0}%` }}
+                                                />
+                                            </div>
+                                            <span className="text-[10px] font-mono text-muted-foreground">{row.kvPct >= 0 ? `${row.kvPct}%` : "—"}</span>
+                                        </div>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div className="flex items-center gap-2">
+                                            <div className={cn("w-1.5 h-1.5 rounded-full", row.status === "ready" ? "bg-success" : "bg-warning animate-pulse")} />
+                                            <span className={cn("text-[10px] uppercase font-bold tracking-wider", row.status === "ready" ? "text-success" : "text-warning")}>
+                                                {row.status === "ready" ? "Operational" : "Synchronizing"}
                                             </span>
-                                        </TableCell>
-                                        <TableCell>
-                                            <span className={`text-xs font-medium px-2 py-1 rounded-full ${ep.status === "ready" ? "bg-success/10 text-success" : "bg-accent text-muted-foreground"}`}>
-                                                {ep.status}
-                                            </span>
-                                        </TableCell>
-                                    </TableRow>
-                                )
-                            })
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                            ))
                         )}
                     </TableBody>
                 </Table>

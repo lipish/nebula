@@ -1,29 +1,29 @@
-import { useCallback, useEffect, useState } from "react"
-import { Plus, Trash2, Container, RefreshCw, CheckCircle2, XCircle, Loader2, Clock } from "lucide-react"
+import { useState } from "react"
+import { Plus, Trash2, Container, RefreshCw, CheckCircle2, XCircle, Loader2, Clock, ChevronRight, ChevronDown, Edit2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { apiGet, apiPut, apiDelete } from "@/lib/api"
-import type { EngineImage, NodeImageStatus } from "@/lib/types"
+import { apiPut, apiDelete } from "@/lib/api"
+import type { EngineImage } from "@/lib/types"
 import { useI18n } from "@/lib/i18n"
+import { useImages } from "@/hooks/useImages"
+import { useAuthStore } from "@/store/useAuthStore"
+import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 
-interface ImagesViewProps {
-  token: string
-}
-
-const statusIcon = (status: string) => {
+const StatusIcon = ({ status }: { status: string }) => {
   switch (status) {
     case "ready":
-      return <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+      return <CheckCircle2 className="h-3.5 w-3.5 text-success" />
     case "pulling":
-      return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+      return <Loader2 className="h-3.5 w-3.5 text-primary animate-spin" />
     case "failed":
-      return <XCircle className="h-4 w-4 text-red-500" />
+      return <XCircle className="h-3.5 w-3.5 text-destructive" />
     default:
-      return <Clock className="h-4 w-4 text-muted-foreground" />
+      return <Clock className="h-3.5 w-3.5 text-muted-foreground" />
   }
 }
 
@@ -37,43 +37,18 @@ const EMPTY_FORM: Omit<EngineImage, "created_at_ms" | "updated_at_ms"> = {
   description: "",
 }
 
-export function ImagesView({ token }: ImagesViewProps) {
+export function ImagesView() {
   const { t } = useI18n()
-  const [images, setImages] = useState<EngineImage[]>([])
-  const [statuses, setStatuses] = useState<NodeImageStatus[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { token } = useAuthStore()
+  const { data, isLoading, refetch } = useImages()
+  const images = data?.images || []
+  const statuses = data?.statuses || []
+
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [platformInput, setPlatformInput] = useState("")
   const [expandedImage, setExpandedImage] = useState<string | null>(null)
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [imgs, sts] = await Promise.all([
-        apiGet<EngineImage[]>("/images", token),
-        apiGet<NodeImageStatus[]>("/images/status", token),
-      ])
-      setImages(imgs)
-      setStatuses(sts)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('images.failedLoad'))
-    } finally {
-      setLoading(false)
-    }
-  }, [token])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
-
-  useEffect(() => {
-    const id = setInterval(refresh, 15000)
-    return () => clearInterval(id)
-  }, [refresh])
 
   const openCreate = () => {
     setEditingId(null)
@@ -99,61 +74,65 @@ export function ImagesView({ token }: ImagesViewProps) {
 
   const handleSave = async () => {
     if (!form.id || !form.image) return
-    setError(null)
-    try {
-      const payload = {
-        ...form,
-        platforms: platformInput
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        created_at_ms: 0,
-        updated_at_ms: 0,
-      }
-      await apiPut(`/images/${form.id}`, payload, token)
-      setDialogOpen(false)
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save image")
+    const payload = {
+      ...form,
+      platforms: platformInput
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      created_at_ms: 0,
+      updated_at_ms: 0,
     }
+    const promise = apiPut(`/images/${form.id}`, payload, token || '')
+    toast.promise(promise, {
+      loading: 'Saving engine image...',
+      success: () => {
+        setDialogOpen(false)
+        refetch()
+        return 'Image saved successfully'
+      },
+      error: 'Failed to save image'
+    })
   }
 
   const handleDelete = async (id: string) => {
-    setError(null)
-    try {
-      await apiDelete(`/images/${id}`, token)
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete image")
-    }
+    const promise = apiDelete(`/images/${id}`, token || '')
+    toast.promise(promise, {
+      loading: 'Deleting image...',
+      success: () => {
+        refetch()
+        return 'Image deleted'
+      },
+      error: 'Failed to delete'
+    })
   }
 
-  const nodeStatuses = (imageId: string) =>
+  const getImageNodeStatuses = (imageId: string) =>
     statuses.filter((s) => s.image_id === imageId)
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">{t('images.title')}</h2>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h2 className="text-3xl font-bold tracking-tight font-mono uppercase text-foreground">{t('images.title')}</h2>
+          <p className="text-muted-foreground mt-2 flex items-center gap-2">
+            <Container className="h-4 w-4 text-primary" />
             {t('images.subtitle')}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-3">
           <Button
             variant="outline"
             size="sm"
-            onClick={refresh}
-            disabled={loading}
-            className="rounded-xl"
+            onClick={() => refetch()}
+            className="h-11 px-4 bg-white/5 border-border/50 font-mono text-[10px] uppercase tracking-widest"
           >
-            <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={cn("h-3.5 w-3.5 mr-2", isLoading ? "animate-spin" : "")} />
             {t('common.refresh')}
           </Button>
           <Button
             onClick={openCreate}
-            className="bg-primary hover:bg-primary/90 rounded-xl shadow-sm px-5"
+            className="bg-primary text-primary-foreground rim-light h-11 px-6 font-bold uppercase tracking-widest text-xs"
           >
             <Plus className="mr-2 h-4 w-4" />
             {t('images.register')}
@@ -161,58 +140,44 @@ export function ImagesView({ token }: ImagesViewProps) {
         </div>
       </div>
 
-      {error && (
-        <div className="bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-
-      {/* Image List */}
-      <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-border bg-accent/30 flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-bold text-foreground tracking-tight">
+      <div className="bg-card/40 backdrop-blur-xl border border-border rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between bg-white/5">
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-bold font-mono uppercase tracking-widest text-muted-foreground">
               {t('images.registered')}
             </h3>
           </div>
-          <Badge
-            variant="outline"
-            className="font-bold border-primary/20 text-primary uppercase h-6"
-          >
+          <Badge variant="outline" className="font-mono text-[10px] border-primary/20 text-primary uppercase">
             {images.length} {t('common.total')}
           </Badge>
         </div>
 
         <Table>
-          <TableHeader>
-            <TableRow className="bg-muted hover:bg-muted border-b border-border">
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase pl-6 pr-4 py-4">
-                ID
-              </TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
-                Engine
-              </TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
-                Image
-              </TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
-                Policy
-              </TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase px-4 py-4">
-                Node Status
-              </TableHead>
-              <TableHead className="text-right text-[11px] font-bold text-muted-foreground uppercase pl-4 pr-6 py-4">
-                Actions
-              </TableHead>
+          <TableHeader className="bg-black/20">
+            <TableRow className="border-border/50 hover:bg-transparent">
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground px-6 py-4">Image Identity</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Engine</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Docker Reference</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Node Distribution</TableHead>
+              <TableHead className="text-right text-[10px] uppercase font-bold text-muted-foreground pr-6">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {images.length === 0 ? (
+            {isLoading && images.length === 0 ? (
+                <TableRow>
+                    <TableCell colSpan={5} className="h-64 text-center">
+                        <div className="flex flex-col items-center gap-3 opacity-50">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            <p className="text-[10px] font-mono uppercase tracking-widest">LOADING IMAGES...</p>
+                        </div>
+                    </TableCell>
+                </TableRow>
+            ) : images.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-48 text-center">
-                  <div className="flex flex-col items-center justify-center opacity-40">
-                    <Container className="h-12 w-12 mb-2" />
-                    <p className="text-sm font-bold text-muted-foreground">
+                <TableCell colSpan={5} className="h-64 text-center">
+                  <div className="flex flex-col items-center justify-center opacity-30 gap-3">
+                    <Container className="h-12 w-12" />
+                    <p className="text-[10px] font-mono uppercase tracking-widest">
                       {t('images.noData')}
                     </p>
                   </div>
@@ -220,128 +185,116 @@ export function ImagesView({ token }: ImagesViewProps) {
               </TableRow>
             ) : (
               images.map((img) => {
-                const ns = nodeStatuses(img.id)
+                const ns = getImageNodeStatuses(img.id)
                 const readyCount = ns.filter((s) => s.status === "ready").length
                 const totalCount = ns.length
                 const isExpanded = expandedImage === img.id
 
                 return (
-                  <TableRow key={img.id} className="group">
-                    <TableCell className="pl-6 py-4">
-                      <button
-                        onClick={() =>
-                          setExpandedImage(isExpanded ? null : img.id)
-                        }
-                        className="text-left"
-                      >
-                        <div className="font-bold text-sm tracking-tight">
+                  <>
+                  <TableRow key={img.id} className={cn("border-border/40 hover:bg-white/5 transition-colors group", isExpanded ? "bg-white/5" : "")}>
+                    <TableCell className="px-6 py-5">
+                      <div className="flex flex-col gap-1">
+                        <span className="font-mono text-sm font-bold group-hover:text-primary transition-colors cursor-pointer flex items-center gap-2"
+                              onClick={() => setExpandedImage(isExpanded ? null : img.id)}>
+                          {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                           {img.id}
-                        </div>
+                        </span>
                         {img.description && (
-                          <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[180px] truncate">
+                          <span className="text-[10px] text-muted-foreground/60 font-mono italic px-5">
                             {img.description}
-                          </div>
+                          </span>
                         )}
-                      </button>
+                      </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="font-bold text-[11px] uppercase">
+                      <Badge variant="outline" className="font-mono text-[10px] border-border/50 text-muted-foreground uppercase">
                         {img.engine_type}
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <div className="font-mono text-xs bg-accent/40 inline-block px-2 py-0.5 rounded max-w-[280px] truncate">
-                        {img.image}
-                      </div>
-                      {img.platforms.length > 0 && (
-                        <div className="flex gap-1 mt-1">
-                          {img.platforms.map((p) => (
-                            <span
-                              key={p}
-                              className="text-[9px] bg-accent/60 px-1.5 py-0.5 rounded text-muted-foreground"
-                            >
-                              {p}
-                            </span>
-                          ))}
+                      <div className="flex flex-col gap-1.5">
+                        <span className="font-mono text-[11px] bg-black/20 px-2 py-1 rounded border border-border/30 max-w-[320px] truncate select-all">
+                          {img.image}
+                        </span>
+                        <div className="flex items-center gap-2">
+                           <Badge variant={img.version_policy === "rolling" ? "default" : "secondary"} className="text-[9px] h-4 uppercase px-1.5">
+                             {img.version_policy}
+                           </Badge>
+                           {img.pre_pull && <span className="text-[9px] font-mono text-primary/70 uppercase tracking-tighter">● auto-pull</span>}
                         </div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant={img.version_policy === "rolling" ? "default" : "secondary"}
-                          className="text-[10px] font-bold uppercase"
-                        >
-                          {img.version_policy}
-                        </Badge>
-                        {img.pre_pull && (
-                          <span className="text-[9px] text-muted-foreground">
-                            auto-pull
-                          </span>
-                        )}
                       </div>
                     </TableCell>
                     <TableCell>
                       <button
-                        onClick={() =>
-                          setExpandedImage(isExpanded ? null : img.id)
-                        }
-                        className="text-left"
+                        onClick={() => setExpandedImage(isExpanded ? null : img.id)}
+                        className="flex items-center gap-2 hover:opacity-80 transition-opacity"
                       >
-                        {totalCount > 0 ? (
-                          <span className="text-xs font-bold">
-                            <span className="text-emerald-500">{readyCount}</span>
-                            <span className="text-muted-foreground">/{totalCount} ready</span>
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
-                      </button>
-
-                      {/* Expanded node status */}
-                      {isExpanded && ns.length > 0 && (
-                        <div className="mt-2 space-y-1">
-                          {ns.map((s) => (
-                            <div
-                              key={`${s.node_id}-${s.image_id}`}
-                              className="flex items-center gap-2 text-xs"
-                            >
-                              {statusIcon(s.status)}
-                              <span className="font-medium">{s.node_id}</span>
-                              <span className="text-muted-foreground">
-                                {s.status}
-                              </span>
-                              {s.error && (
-                                <span className="text-destructive text-[10px] truncate max-w-[200px]">
-                                  {s.error}
-                                </span>
-                              )}
-                            </div>
-                          ))}
+                        <div className="flex -space-x-1.5">
+                             {ns.slice(0, 3).map((s, i) => (
+                                 <div key={i} className={cn("w-5 h-5 rounded-full border-2 border-background flex items-center justify-center text-[8px] font-bold", 
+                                     s.status === 'ready' ? "bg-success text-success-foreground" : "bg-warning text-warning-foreground")}>
+                                     {s.node_id[0].toUpperCase()}
+                                 </div>
+                             ))}
+                             {totalCount > 3 && (
+                                 <div className="w-5 h-5 rounded-full border-2 border-background bg-muted flex items-center justify-center text-[8px] font-bold">
+                                     +{totalCount - 3}
+                                 </div>
+                             )}
                         </div>
-                      )}
+                        <span className="text-[10px] font-mono font-bold">
+                           <span className="text-success">{readyCount}</span>
+                           <span className="text-muted-foreground">/{totalCount} OK</span>
+                        </span>
+                      </button>
                     </TableCell>
                     <TableCell className="text-right pr-6">
-                      <div className="flex justify-end gap-1">
+                      <div className="flex justify-end gap-2">
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => openEdit(img)}
-                          className="text-xs font-bold rounded-xl h-8"
+                          className="h-8 w-8 p-0 hover:bg-white/10"
                         >
-                          Edit
+                          <Edit2 className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => handleDelete(img.id)}
-                          className="text-destructive font-bold text-xs hover:text-white hover:bg-destructive rounded-xl h-8"
+                          className="h-8 w-8 p-0 hover:bg-destructive/20 hover:text-destructive"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </TableCell>
                   </TableRow>
+                  {isExpanded && (
+                      <TableRow className="bg-black/10 border-none">
+                          <TableCell colSpan={5} className="px-12 py-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                  {ns.length > 0 ? ns.map((s) => (
+                                    <div key={s.node_id} className="flex items-center justify-between p-3 rounded-lg border border-border/30 bg-card/20 backdrop-blur-sm">
+                                        <div className="flex items-center gap-3">
+                                            <StatusIcon status={s.status} />
+                                            <span className="text-[11px] font-mono font-bold uppercase tracking-widest">{s.node_id}</span>
+                                        </div>
+                                        <span className={cn("text-[10px] font-bold uppercase tracking-tighter", 
+                                            s.status === 'ready' ? "text-success" : s.status === 'failed' ? "text-destructive" : "text-primary")}>
+                                            {s.status}
+                                        </span>
+                                    </div>
+                                  )) : (
+                                    <div className="col-span-full py-4 text-center">
+                                        <p className="text-[10px] font-mono text-muted-foreground uppercase">No distribution data available for this image</p>
+                                    </div>
+                                  )}
+                              </div>
+                          </TableCell>
+                      </TableRow>
+                  )}
+                  </>
                 )
               })
             )}
@@ -349,130 +302,121 @@ export function ImagesView({ token }: ImagesViewProps) {
         </Table>
       </div>
 
-      {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className="sm:max-w-[500px] bg-card/95 backdrop-blur-2xl border-border rim-light">
           <DialogHeader>
-            <DialogTitle>
-              {editingId ? t('images.editImage') : t('images.registerNewImage')}
+            <DialogTitle className="font-mono uppercase tracking-tight text-2xl">
+              {editingId ? "Update Engine Image" : "Register Engine Image"}
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          <div className="space-y-6 py-4">
+            <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="img-id" className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">{t('images.imageId')}</Label>
+                    <Input
+                        id="img-id"
+                        className="bg-white/5 border-border/50 font-mono"
+                        placeholder="e.g. vllm-deepseek"
+                        value={form.id}
+                        onChange={(e) => setForm({ ...form, id: e.target.value })}
+                        disabled={!!editingId}
+                    />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="img-engine" className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">{t('images.engineType')}</Label>
+                    <select
+                        id="img-engine"
+                        value={form.engine_type}
+                        onChange={(e) => setForm({ ...form, engine_type: e.target.value })}
+                        className="flex h-10 w-full rounded-md border border-border/50 bg-white/5 px-3 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary/30"
+                    >
+                        <option value="vllm">vLLM</option>
+                        <option value="sglang">SGLang</option>
+                        <option value="xllm">xLLM</option>
+                    </select>
+                </div>
+            </div>
+
             <div className="space-y-2">
-              <Label htmlFor="img-id">{t('images.imageId')}</Label>
-              <Input
-                id="img-id"
-                placeholder={t('images.imageIdPlaceholder')}
-                value={form.id}
-                onChange={(e) => setForm({ ...form, id: e.target.value })}
-                disabled={!!editingId}
-              />
+                <Label htmlFor="img-ref" className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">{t('images.dockerImage')}</Label>
+                <div className="relative">
+                    <Container className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        id="img-ref"
+                        className="pl-10 bg-white/5 border-border/50 font-mono text-xs"
+                        placeholder="docker.io/library/vllm:latest"
+                        value={form.image}
+                        onChange={(e) => setForm({ ...form, image: e.target.value })}
+                    />
+                </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="img-engine">{t('images.engineType')}</Label>
-                <select
-                  id="img-engine"
-                  value={form.engine_type}
-                  onChange={(e) =>
-                    setForm({ ...form, engine_type: e.target.value })
-                  }
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <option value="vllm">vLLM</option>
-                  <option value="sglang">SGLang</option>
-                  <option value="xllm">xLLM</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="img-policy">{t('images.versionPolicy')}</Label>
-                <select
-                  id="img-policy"
-                  value={form.version_policy}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      version_policy: e.target.value as "pin" | "rolling",
-                    })
-                  }
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <option value="pin">{t('images.pinStable')}</option>
-                  <option value="rolling">{t('images.rollingLatest')}</option>
-                </select>
-              </div>
+                <div className="space-y-2">
+                    <Label htmlFor="img-policy" className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">{t('images.versionPolicy')}</Label>
+                    <select
+                        id="img-policy"
+                        value={form.version_policy}
+                        onChange={(e) => setForm({ ...form, version_policy: e.target.value as "pin" | "rolling" })}
+                        className="flex h-10 w-full rounded-md border border-border/50 bg-white/5 px-3 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary/30"
+                    >
+                        <option value="pin">Pin (Stable)</option>
+                        <option value="rolling">Rolling (Latest)</option>
+                    </select>
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="img-platforms" className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Platforms</Label>
+                    <Input
+                        id="img-platforms"
+                        className="bg-white/5 border-border/50 font-mono text-xs"
+                        placeholder="linux/amd64"
+                        value={platformInput}
+                        onChange={(e) => setPlatformInput(e.target.value)}
+                    />
+                </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="img-ref">{t('images.dockerImage')}</Label>
-              <Input
-                id="img-ref"
-                placeholder={t('images.dockerImagePlaceholder')}
-                value={form.image}
-                onChange={(e) => setForm({ ...form, image: e.target.value })}
-              />
+                <Label htmlFor="img-desc" className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Description</Label>
+                <Input
+                    id="img-desc"
+                    className="bg-white/5 border-border/50"
+                    placeholder="Optional image description"
+                    value={form.description || ""}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="img-platforms">
-                {t('images.platforms')} {" "}
-                <span className="text-muted-foreground font-normal">
-                  ({t('images.platformsHint')})
-                </span>
-              </Label>
-              <Input
-                id="img-platforms"
-                placeholder={t('images.platformsPlaceholder')}
-                value={platformInput}
-                onChange={(e) => setPlatformInput(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="img-desc">{t('templates.description')}</Label>
-              <Input
-                id="img-desc"
-                placeholder={t('templates.optional')}
-                value={form.description || ""}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="img-prepull"
-                checked={form.pre_pull}
-                onChange={(e) =>
-                  setForm({ ...form, pre_pull: e.target.checked })
-                }
-                className="rounded border-input"
-              />
-              <Label htmlFor="img-prepull" className="font-normal">
-                {t('images.autoPrePull')}
-              </Label>
+            <div className="flex items-center gap-3 p-3 rounded-lg border border-border/30 bg-white/5">
+                <input
+                    type="checkbox"
+                    id="img-prepull"
+                    checked={form.pre_pull}
+                    onChange={(e) => setForm({ ...form, pre_pull: e.target.checked })}
+                    className="h-4 w-4 rounded border-border bg-black/20 text-primary focus:ring-primary/30"
+                />
+                <div className="space-y-0.5">
+                    <Label htmlFor="img-prepull" className="text-xs font-bold uppercase tracking-tight">Automatic Pre-pull</Label>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Eagerly pull this image to all eligible nodes</p>
+                </div>
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="bg-black/20 -mx-6 -mb-6 p-6 mt-4">
             <Button
-              variant="outline"
+              variant="ghost"
               onClick={() => setDialogOpen(false)}
-              className="rounded-xl"
+              className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
             >
               {t('common.cancel')}
             </Button>
             <Button
               onClick={handleSave}
               disabled={!form.id || !form.image}
-              className="rounded-xl"
+              className="bg-primary text-primary-foreground rim-light h-10 px-6 font-bold uppercase tracking-widest text-xs ml-auto"
             >
-              {editingId ? t('images.update') : t('images.register')}
+              {editingId ? "Update Registry" : "Commit Image"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Activity, AlertTriangle, Clock3, RefreshCw, Shield } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Clock3, RefreshCw, Shield, BarChart3, TrendingUp } from 'lucide-react'
 import {
   Bar,
   BarChart,
@@ -9,71 +9,25 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { v2 } from '@/lib/api'
-import type {
-  GatewayLatency,
-  GatewayOverview,
-  GatewayProtection,
-  GatewayReliability,
-  GatewayTimePoint,
-  GatewayTraffic,
-} from '@/lib/types'
+import type { GatewayTimePoint } from '@/lib/types'
 import { useI18n } from '@/lib/i18n'
 import { Button } from '@/components/ui/button'
-
-interface GatewayViewProps {
-  token: string
-}
+import { Badge } from '@/components/ui/badge'
+import { useGatewayStats } from '@/hooks/useGatewayStats'
+import { cn } from '@/lib/utils'
 
 const WINDOW_OPTIONS = ['5m', '15m', '1h', '6h', '24h'] as const
 
 const latestValue = (points: GatewayTimePoint[]) => points[points.length - 1]?.value ?? 0
-
 const toPct = (value: number) => `${(value * 100).toFixed(2)}%`
-
 const fmtNumber = (value: number, digits = 2) => value.toLocaleString(undefined, { maximumFractionDigits: digits })
 
-const chartAxisStyle = { fontSize: 11, fill: 'hsl(var(--muted-foreground))' }
-
-export function GatewayView({ token }: GatewayViewProps) {
+export function GatewayView() {
   const { t } = useI18n()
   const [windowValue, setWindowValue] = useState<(typeof WINDOW_OPTIONS)[number]>('15m')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { data, isLoading, isFetching, refetch } = useGatewayStats(windowValue)
 
-  const [overview, setOverview] = useState<GatewayOverview | null>(null)
-  const [traffic, setTraffic] = useState<GatewayTraffic | null>(null)
-  const [reliability, setReliability] = useState<GatewayReliability | null>(null)
-  const [protection, setProtection] = useState<GatewayProtection | null>(null)
-  const [latency, setLatency] = useState<GatewayLatency | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [ov, tr, rel, pro, lat] = await Promise.all([
-        v2.gatewayOverview(windowValue, token),
-        v2.gatewayTraffic(windowValue, token),
-        v2.gatewayReliability(windowValue, token),
-        v2.gatewayProtection(windowValue, token),
-        v2.gatewayLatency(windowValue, token),
-      ])
-      setOverview(ov)
-      setTraffic(tr)
-      setReliability(rel)
-      setProtection(pro)
-      setLatency(lat)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('gateway.loadFailed'))
-    } finally {
-      setLoading(false)
-    }
-  }, [token, windowValue, t])
-
-  useEffect(() => {
-    if (!token) return
-    void load()
-  }, [token, load])
+  const { overview, traffic, reliability, protection, latency } = data || {}
 
   const trafficSummary = useMemo(() => {
     if (!traffic) return null
@@ -84,15 +38,6 @@ export function GatewayView({ token }: GatewayViewProps) {
       s5xx: latestValue(traffic.series.responses_5xx),
     }
   }, [traffic])
-
-  const trafficChartData = useMemo(() => {
-    if (!trafficSummary) return []
-    return [
-      { name: '2xx', value: trafficSummary.s2xx },
-      { name: '4xx', value: trafficSummary.s4xx },
-      { name: '5xx', value: trafficSummary.s5xx },
-    ]
-  }, [trafficSummary])
 
   const reliabilitySummary = useMemo(() => {
     if (!reliability) return null
@@ -106,18 +51,6 @@ export function GatewayView({ token }: GatewayViewProps) {
     }
   }, [reliability])
 
-  const reliabilityChartData = useMemo(() => {
-    if (!reliabilitySummary) return []
-    return [
-      { name: 'retry', value: reliabilitySummary.retry },
-      { name: 'retry_success', value: reliabilitySummary.retrySuccess },
-      { name: 'connect', value: reliabilitySummary.connect },
-      { name: 'timeout', value: reliabilitySummary.timeout },
-      { name: 'upstream_5xx', value: reliabilitySummary.up5xx },
-      { name: 'other', value: reliabilitySummary.other },
-    ]
-  }, [reliabilitySummary])
-
   const latencySummary = useMemo(() => {
     if (!latency) return null
     return {
@@ -129,170 +62,157 @@ export function GatewayView({ token }: GatewayViewProps) {
     }
   }, [latency])
 
-  const latencyChartData = useMemo(() => {
-    if (!latencySummary) return []
-    return [
-      { name: 'p50', value: latencySummary.p50 },
-      { name: 'p95', value: latencySummary.p95 },
-      { name: 'p99', value: latencySummary.p99 },
-      { name: 'ttft_p50', value: latencySummary.ttft50 },
-      { name: 'ttft_p95', value: latencySummary.ttft95 },
-    ]
-  }, [latencySummary])
-
-  const protectionChartData = useMemo(() => {
-    if (!protection) return []
-    return [
-      { name: 'too_large', value: protection.request_too_large_count },
-      { name: 'circuit_skipped', value: protection.circuit_skipped_count },
-      { name: 'circuit_open', value: protection.circuit_open_count },
-    ]
-  }, [protection])
+  const chartData = useMemo(() => {
+    if (!trafficSummary || !reliabilitySummary || !latencySummary || !protection) return { traffic: [], reliability: [], latency: [], protection: [] }
+    
+    return {
+      traffic: [
+        { name: '2xx', value: trafficSummary.s2xx },
+        { name: '4xx', value: trafficSummary.s4xx },
+        { name: '5xx', value: trafficSummary.s5xx },
+      ],
+      reliability: [
+        { name: 'Retry', value: reliabilitySummary.retry },
+        { name: 'Success', value: reliabilitySummary.retrySuccess },
+        { name: 'Connect', value: reliabilitySummary.connect },
+        { name: 'Timeout', value: reliabilitySummary.timeout },
+        { name: 'Up 5xx', value: reliabilitySummary.up5xx },
+      ],
+      latency: [
+        { name: 'P50', value: latencySummary.p50 },
+        { name: 'P95', value: latencySummary.p95 },
+        { name: 'P99', value: latencySummary.p99 },
+        { name: 'TTFT 50', value: latencySummary.ttft50 },
+        { name: 'TTFT 95', value: latencySummary.ttft95 },
+      ],
+      protection: [
+        { name: 'Too Large', value: protection.request_too_large_count },
+        { name: 'Skipped', value: protection.circuit_skipped_count },
+        { name: 'Open', value: protection.circuit_open_count },
+      ]
+    }
+  }, [trafficSummary, reliabilitySummary, latencySummary, protection])
 
   return (
-    <>
-      <div className="mb-6 flex items-center justify-between gap-3">
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground mb-1">{t('gateway.title')}</h2>
-          <p className="text-sm text-muted-foreground">{t('gateway.subtitle')}</p>
+          <h2 className="text-3xl font-bold tracking-tight font-mono uppercase text-foreground">{t('gateway.title')}</h2>
+          <p className="text-muted-foreground mt-2 flex items-center gap-2">
+            <Shield className="h-4 w-4 text-primary" />
+            {t('gateway.subtitle')}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          {WINDOW_OPTIONS.map((option) => (
-            <Button
-              key={option}
-              variant={windowValue === option ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setWindowValue(option)}
-            >
-              {option}
-            </Button>
-          ))}
-          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-            <RefreshCw className="h-4 w-4 mr-1" />
-            {t('common.refresh')}
+        <div className="flex items-center gap-3 bg-card/40 backdrop-blur-xl border border-border p-1.5 rounded-xl">
+          <div className="flex items-center gap-1 bg-black/20 p-1 rounded-lg">
+            {WINDOW_OPTIONS.map((option) => (
+              <button
+                key={option}
+                onClick={() => setWindowValue(option)}
+                className={cn(
+                  "px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all",
+                  windowValue === option 
+                    ? "bg-primary text-primary-foreground shadow-sm" 
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => refetch()} 
+            disabled={isLoading}
+            className="h-9 w-9 p-0 hover:bg-white/10"
+          >
+            <RefreshCw className={cn("h-4 w-4", isFetching ? "animate-spin" : "")} />
           </Button>
         </div>
       </div>
 
-      {error && (
-        <div className="mb-6 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {t('gateway.loadFailed')}: {error}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-muted-foreground">{t('gateway.rps')}</span>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="text-2xl font-bold">{overview ? fmtNumber(overview.rps, 3) : '—'}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl rim-light relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <TrendingUp className="h-12 w-12" />
+            </div>
+            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1">{t('gateway.rps')}</p>
+            <h3 className="text-2xl font-mono font-bold text-foreground">{overview ? fmtNumber(overview.rps, 3) : '—'}</h3>
+            <div className="flex items-center gap-1.5 mt-4">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-signal" />
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Flow active</p>
+            </div>
         </div>
 
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-muted-foreground">{t('gateway.error5xx')}</span>
-            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="text-2xl font-bold">{overview ? toPct(overview.error_5xx_ratio) : '—'}</div>
+        <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl rim-light">
+            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1">{t('gateway.error5xx')}</p>
+            <h3 className={cn("text-2xl font-mono font-bold", (overview?.error_5xx_ratio || 0) > 0.05 ? "text-destructive" : "text-foreground")}>
+                {overview ? toPct(overview.error_5xx_ratio) : '—'}
+            </h3>
+            <div className="flex items-center gap-1.5 mt-4">
+                <div className={cn("w-1.5 h-1.5 rounded-full", (overview?.error_5xx_ratio || 0) > 0.05 ? "bg-destructive" : "bg-success")} />
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Upstream status</p>
+            </div>
         </div>
 
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-muted-foreground">{t('gateway.retrySuccess')}</span>
-            <Shield className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="text-2xl font-bold">{overview ? toPct(overview.retry_success_ratio) : '—'}</div>
+        <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl rim-light">
+            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1">{t('gateway.retrySuccess')}</p>
+            <h3 className="text-2xl font-mono font-bold text-foreground">{overview ? toPct(overview.retry_success_ratio) : '—'}</h3>
+            <div className="flex items-center gap-1.5 mt-4">
+                <Shield className="h-3 w-3 text-success" />
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Protection layer active</p>
+            </div>
         </div>
 
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-muted-foreground">{t('gateway.circuitOpen')}</span>
-            <Clock3 className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="text-2xl font-bold">{overview ? overview.circuit_open_count : '—'}</div>
+        <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl rim-light">
+            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1">Circuit State</p>
+            <h3 className={cn("text-2xl font-mono font-bold", (overview?.circuit_open_count || 0) > 0 ? "text-warning" : "text-success")}>
+                {overview?.circuit_open_count || 0 > 0 ? "OPEN / DEGRADED" : "CLOSED / NOMINAL"}
+            </h3>
+            <div className="flex items-center gap-1.5 mt-4">
+                <Clock3 className="h-3 w-3 text-muted-foreground" />
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">{overview?.circuit_open_count || 0} Open breaks</p>
+            </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-semibold">{t('gateway.traffic')}</h3>
-            <span className="text-xs text-muted-foreground">{t('gateway.currentWindow', { window: windowValue })}</span>
-          </div>
-          <div className="text-sm mb-3">req/s: <span className="font-semibold">{trafficSummary ? fmtNumber(trafficSummary.total) : '—'}</span></div>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={trafficChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={chartAxisStyle} />
-                <YAxis axisLine={false} tickLine={false} tick={chartAxisStyle} />
-                <Tooltip />
-                <Bar dataKey="value" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-semibold">{t('gateway.reliability')}</h3>
-            <span className="text-xs text-muted-foreground">{t('gateway.currentWindow', { window: windowValue })}</span>
-          </div>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={reliabilityChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={chartAxisStyle} />
-                <YAxis axisLine={false} tickLine={false} tick={chartAxisStyle} />
-                <Tooltip />
-                <Bar dataKey="value" fill="hsl(var(--chart-2))" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-semibold">{t('gateway.latency')}</h3>
-            <span className="text-xs text-muted-foreground">{t('gateway.currentWindow', { window: windowValue })}</span>
-          </div>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={latencyChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={chartAxisStyle} />
-                <YAxis axisLine={false} tickLine={false} tick={chartAxisStyle} />
-                <Tooltip formatter={(value) => `${fmtNumber(Number(value ?? 0))} ms`} />
-                <Bar dataKey="value" fill="hsl(var(--chart-3))" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-semibold">{t('gateway.protection')}</h3>
-            <span className="text-xs text-muted-foreground">{t('gateway.currentWindow', { window: windowValue })}</span>
-          </div>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={protectionChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={chartAxisStyle} />
-                <YAxis axisLine={false} tickLine={false} tick={chartAxisStyle} allowDecimals={false} />
-                <Tooltip />
-                <Bar dataKey="value" fill="hsl(var(--chart-4))" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-muted-foreground mt-2">
-            <div>{t('gateway.tooLarge')}: <span className="font-semibold text-foreground">{protection ? protection.request_too_large_count : '—'}</span></div>
-            <div>{t('gateway.circuitSkipped')}: <span className="font-semibold text-foreground">{protection ? protection.circuit_skipped_count : '—'}</span></div>
-            <div>{t('gateway.circuitOpen')}: <span className="font-semibold text-foreground">{protection ? protection.circuit_open_count : '—'}</span></div>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartCard title={t('gateway.traffic')} data={chartData.traffic} color="oklch(70% 0.18 190)" window={windowValue} />
+        <ChartCard title={t('gateway.reliability')} data={chartData.reliability} color="oklch(75% 0.12 280)" window={windowValue} />
+        <ChartCard title={t('gateway.latency')} data={chartData.latency} color="oklch(68% 0.22 150)" window={windowValue} unit="ms" />
+        <ChartCard title={t('gateway.protection')} data={chartData.protection} color="oklch(60% 0.2 25)" window={windowValue} />
       </div>
-    </>
+    </div>
+  )
+}
+
+function ChartCard({ title, data, color, window, unit = "" }: { title: string, data: any[], color: string, window: string, unit?: string }) {
+  return (
+    <div className="bg-card/40 backdrop-blur-xl border border-border p-6 rounded-xl">
+      <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{title}</h3>
+          </div>
+          <Badge variant="outline" className="font-mono text-[9px] border-border/50 text-muted-foreground uppercase">{window} WINDOW</Badge>
+      </div>
+      <div className="h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="oklch(30% 0.05 260 / 0.2)" />
+            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "oklch(75% 0.02 260)" }} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "oklch(75% 0.02 260)" }} />
+            <Tooltip 
+                cursor={{ fill: "oklch(100% 0 0 / 0.05)" }}
+                contentStyle={{ backgroundColor: "oklch(22% 0.03 260)", border: "1px solid oklch(30% 0.05 260 / 0.5)", borderRadius: "8px", fontSize: "12px" }}
+                itemStyle={{ color: "oklch(98% 0.01 260)" }}
+                formatter={(value) => [`${fmtNumber(Number(value))}${unit}`, "Value"]}
+            />
+            <Bar dataKey="value" fill={color} radius={[4, 4, 0, 0]} barSize={40} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   )
 }

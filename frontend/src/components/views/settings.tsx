@@ -1,67 +1,149 @@
-import { ShieldCheck, KeyRound } from "lucide-react"
+import { ShieldCheck, KeyRound, Monitor, Cpu, Globe, Database, Settings2, Power } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useI18n } from "@/lib/i18n"
+import { useAuthStore } from "@/store/useAuthStore"
+import { toast } from "sonner"
 
-interface SettingsProps {
-    token: string
-    setToken: (v: string) => void
-    onSaveToken: () => void
-}
-
-export function SettingsView({ token: _token, setToken: _setToken, onSaveToken }: SettingsProps) {
+export function SettingsView() {
     const { t } = useI18n()
+    const { logout, user } = useAuthStore()
+
+    const handleLogout = () => {
+        logout()
+        toast.success("Identity session terminated")
+    }
+
     return (
-        <div className="max-w-2xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div>
-                <h2 className="text-2xl font-bold text-foreground">{t('settings.title')}</h2>
-                <p className="text-sm text-muted-foreground mt-1">{t('settings.subtitle')}</p>
+        <div className="max-w-4xl space-y-10 animate-in fade-in duration-500">
+            <div className="flex justify-between items-end">
+                <div>
+                    <h2 className="text-3xl font-bold tracking-tight font-mono uppercase text-foreground">{t('settings.title')}</h2>
+                    <p className="text-muted-foreground mt-2 flex items-center gap-2">
+                        <Settings2 className="h-4 w-4 text-primary" />
+                        {t('settings.subtitle')}
+                    </p>
+                </div>
             </div>
 
-            <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-8">
-                    <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-                            <ShieldCheck className="h-5 w-5" />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="md:col-span-2 space-y-6">
+                    {/* Identity & Access */}
+                    <div className="bg-card/40 backdrop-blur-xl border border-border rounded-2xl overflow-hidden rim-light">
+                        <div className="px-6 py-5 border-b border-border/50 flex items-center justify-between bg-white/5">
+                            <div className="flex items-center gap-3">
+                                <ShieldCheck className="h-5 w-5 text-primary" />
+                                <h3 className="text-xs font-bold font-mono uppercase tracking-widest text-foreground">Identity & Access Management</h3>
+                            </div>
+                            <Badge variant="outline" className="font-mono text-[9px] border-primary/20 text-primary uppercase">Active Session</Badge>
                         </div>
-                        <div>
-                            <h3 className="text-lg font-bold text-foreground tracking-tight">{t('settings.auth')}</h3>
-                            <p className="text-xs font-medium text-muted-foreground">{t('settings.authDesc')}</p>
+                        <div className="p-6 space-y-6">
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-1">
+                                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Authorized User</p>
+                                    <p className="text-lg font-mono font-bold text-foreground">{user?.username || "SYSTEM_ROOT"}</p>
+                                </div>
+                                <div className="h-12 w-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center">
+                                    <KeyRound className="h-6 w-6 text-primary" />
+                                </div>
+                            </div>
+
+                            <div className="p-4 rounded-xl bg-black/20 border border-border/50 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold text-muted-foreground uppercase">Access Role</span>
+                                    <Badge className="bg-primary text-primary-foreground font-mono text-[10px] h-5 uppercase">{user?.role || "ADMIN"}</Badge>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px]">
+                                    <span className="font-bold text-muted-foreground uppercase">Session Persistence</span>
+                                    <span className="font-mono text-foreground uppercase">Enabled ● LocalStorage</span>
+                                </div>
+                            </div>
+
+                            <div className="pt-2 flex gap-3">
+                                <Button className="flex-1 bg-white/5 border border-border/50 hover:bg-white/10 font-bold uppercase text-[10px] tracking-widest h-10">
+                                    Update Credentials
+                                </Button>
+                                <Button 
+                                    onClick={handleLogout}
+                                    className="flex-1 bg-destructive/10 border border-destructive/30 text-destructive hover:bg-destructive/20 font-bold uppercase text-[10px] tracking-widest h-10"
+                                >
+                                    <Power className="h-3.5 w-3.5 mr-2" /> Terminate Session
+                                </Button>
+                            </div>
                         </div>
                     </div>
-                    <Badge variant="outline" className="border-border text-muted-foreground font-bold text-[9px] uppercase tracking-widest">
-                        {t('settings.serverManaged')}
-                    </Badge>
+
+                    {/* Regional & Protocol */}
+                    <div className="bg-card/40 backdrop-blur-xl border border-border rounded-2xl overflow-hidden">
+                        <div className="px-6 py-5 border-b border-border/50 flex items-center justify-between bg-white/5">
+                            <div className="flex items-center gap-3">
+                                <Globe className="h-5 w-5 text-muted-foreground" />
+                                <h3 className="text-xs font-bold font-mono uppercase tracking-widest text-foreground">Localization & Protocol</h3>
+                            </div>
+                        </div>
+                        <div className="p-6 grid grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Interface Language</p>
+                                <select className="w-full h-10 bg-black/20 border border-border/50 rounded-lg px-3 text-xs font-mono focus:outline-none">
+                                    <option value="en">English (US)</option>
+                                    <option value="zh">简体中文 (CN)</option>
+                                </select>
+                            </div>
+                            <div className="space-y-2">
+                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">API Endpoint Schema</p>
+                                <select className="w-full h-10 bg-black/20 border border-border/50 rounded-lg px-3 text-xs font-mono focus:outline-none">
+                                    <option value="v2">Nebula Core v2 (Rest)</option>
+                                    <option value="grpc">Nebula Mesh (gRPC)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="space-y-6">
-                    <div className="rounded-xl border border-border px-4 py-3 bg-accent/20">
-                        <div className="flex items-center gap-2 mb-1">
-                            <KeyRound className="h-4 w-4 text-primary" />
-                            <p className="text-sm font-semibold text-foreground">{t('settings.sessionAuth')}</p>
+                    {/* System Manifest */}
+                    <div className="bg-card/40 backdrop-blur-xl border border-border rounded-2xl p-6 space-y-8">
+                        <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] text-center">System Manifest</h4>
+                        
+                        <div className="space-y-6">
+                            <div className="flex items-center gap-4">
+                                <div className="p-2.5 rounded-lg bg-white/5 border border-border/50">
+                                    <Monitor className="h-4 w-4 text-muted-foreground" />
+                                </div>
+                                <div className="space-y-0.5">
+                                    <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">UI Protocol Version</p>
+                                    <p className="text-sm font-mono font-bold text-foreground">0.1.1-BETA.9</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-4">
+                                <div className="p-2.5 rounded-lg bg-white/5 border border-border/50">
+                                    <Cpu className="h-4 w-4 text-primary" />
+                                </div>
+                                <div className="space-y-0.5">
+                                    <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">API Infrastructure</p>
+                                    <p className="text-sm font-mono font-bold text-primary uppercase">Core-Cluster</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-4">
+                                <div className="p-2.5 rounded-lg bg-white/5 border border-border/50">
+                                    <Database className="h-4 w-4 text-muted-foreground" />
+                                </div>
+                                <div className="space-y-0.5">
+                                    <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Storage Backend</p>
+                                    <p className="text-sm font-mono font-bold text-foreground uppercase">Redis + S3</p>
+                                </div>
+                            </div>
                         </div>
-                        <p className="text-xs text-muted-foreground">{t('settings.sessionDesc')}</p>
-                    </div>
 
-                    <Button
-                        onClick={onSaveToken}
-                        className="w-full bg-primary font-bold rounded-xl h-11 shadow-sm hover:shadow-md active:scale-[0.99] transition-all"
-                    >
-                        {t('settings.refreshProtected')}
-                    </Button>
-                </div>
-            </div>
-
-            <div className="bg-muted/30 border border-border/50 rounded-2xl p-6 border-dashed">
-                <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-widest mb-2 text-center">{t('settings.systemInfo')}</h4>
-                <div className="grid grid-cols-2 gap-4">
-                    <div className="text-center p-3 bg-background/50 rounded-xl border border-border/30 shadow-sm">
-                        <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">{t('settings.uiVersion')}</p>
-                        <p className="text-sm font-bold font-mono">0.1.0-prod</p>
-                    </div>
-                    <div className="text-center p-3 bg-background/50 rounded-xl border border-border/30 shadow-sm">
-                        <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">{t('settings.apiTier')}</p>
-                        <p className="text-sm font-bold font-mono text-primary">Core (BETA)</p>
+                        <div className="pt-4 border-t border-border/30">
+                            <div className="p-4 rounded-xl bg-primary/5 border border-primary/10">
+                                <p className="text-[9px] text-muted-foreground uppercase leading-relaxed tracking-wider text-center">
+                                    Nebula is running in high-availability mode. Configuration changes are synchronized across the cluster in real-time.
+                                </p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

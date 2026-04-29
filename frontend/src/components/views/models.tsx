@@ -1,272 +1,233 @@
-import { useCallback, useEffect, useState } from "react"
-import { Plus, Trash2, Box, Play, Square, Loader2, ExternalLink, Copy, Check } from "lucide-react"
+import { useState } from "react"
+import { Plus, Trash2, Box, Play, Square, Loader2, ExternalLink, Copy, Check, Search, Filter } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import type { AggregatedModelState, ModelView } from "@/lib/types"
+import type { AggregatedModelState } from "@/lib/types"
 import { v2 } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n"
+import { useModels } from "@/hooks/useModels"
+import { useAuthStore } from "@/store/useAuthStore"
+import { toast } from "sonner"
 
-const STATE_BADGE: Record<AggregatedModelState, { key: string; cls: string }> = {
-    running: { key: "state.running", cls: "bg-success/10 text-success border-success/20" },
-    stopped: { key: "state.stopped", cls: "bg-muted text-muted-foreground border-border" },
-    downloading: { key: "state.downloading", cls: "bg-blue-500/10 text-blue-600 border-blue-500/20 animate-pulse" },
-    starting: { key: "state.starting", cls: "bg-yellow-500/10 text-yellow-600 border-yellow-500/20 animate-pulse" },
-    degraded: { key: "state.degraded", cls: "bg-orange-500/10 text-orange-600 border-orange-500/20" },
-    failed: { key: "state.failed", cls: "bg-destructive/10 text-destructive border-destructive/20" },
-    stopping: { key: "state.stopping", cls: "bg-muted text-muted-foreground border-border animate-pulse" },
+const STATE_CONFIG: Record<AggregatedModelState, { key: string; color: string; animate?: boolean }> = {
+    running: { key: "state.running", color: "text-success bg-success/10 border-success/20" },
+    stopped: { key: "state.stopped", color: "text-muted-foreground bg-white/5 border-border" },
+    downloading: { key: "state.downloading", color: "text-primary bg-primary/10 border-primary/20", animate: true },
+    starting: { key: "state.starting", color: "text-warning bg-warning/10 border-warning/20", animate: true },
+    degraded: { key: "state.degraded", color: "text-destructive bg-destructive/10 border-destructive/20" },
+    failed: { key: "state.failed", color: "text-destructive bg-destructive/10 border-destructive/20" },
+    stopping: { key: "state.stopping", color: "text-muted-foreground bg-white/5 border-border", animate: true },
 }
 
-interface ModelsProps {
-    token: string
-    onOpenLoadDialog: () => void
-    onNavigate?: (page: string) => void
-    onSelectModel?: (uid: string) => void
-}
-
-export function ModelsView({
-    token,
-    onOpenLoadDialog,
-    onNavigate: _onNavigate,
-    onSelectModel,
-}: ModelsProps) {
+export function ModelsView() {
     const { t } = useI18n()
-    const [models, setModels] = useState<ModelView[]>([])
-    const [initialLoading, setInitialLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
+    const { token } = useAuthStore()
+    const { data: models = [], isLoading: initialLoading, refetch } = useModels()
     const [acting, setActing] = useState<string | null>(null)
     const [filter, setFilter] = useState<AggregatedModelState | "all">("all")
+    const [searchQuery, setSearchQuery] = useState("")
     const [copiedModelUid, setCopiedModelUid] = useState<string | null>(null)
 
-    const refresh = useCallback(async () => {
-        try {
-            const data = await v2.listModels(token)
-            setModels(data)
-            setError(null)
-        } catch (err) {
-            setError(err instanceof Error ? err.message : t('models.failedLoad'))
-        } finally {
-            setInitialLoading(false)
-        }
-    }, [token, t])
-
-    useEffect(() => { refresh() }, [refresh])
-    useEffect(() => {
-        const id = setInterval(refresh, 8000)
-        return () => clearInterval(id)
-    }, [refresh])
-
-    const act = async (uid: string, fn: () => Promise<unknown>) => {
+    const act = async (uid: string, actionName: string, fn: () => Promise<unknown>) => {
         setActing(uid)
-        try { await fn(); await refresh() } catch (err) {
-            setError(err instanceof Error ? err.message : t('models.actionFailed'))
-        } finally { setActing(null) }
+        const promise = fn()
+        toast.promise(promise, {
+            loading: `${actionName} ${uid}...`,
+            success: () => {
+                refetch()
+                return `${actionName} success`
+            },
+            error: (err) => err instanceof Error ? err.message : `${actionName} failed`,
+        })
+        try {
+            await promise
+        } finally {
+            setActing(null)
+        }
     }
 
     const copyModelName = async (uid: string, modelName: string) => {
-        const markCopied = () => {
+        try {
+            await navigator.clipboard.writeText(modelName)
             setCopiedModelUid(uid)
-            setError(null)
-            setTimeout(() => setCopiedModelUid((current) => (current === uid ? null : current)), 1200)
-        }
-
-        try {
-            if (navigator.clipboard && window.isSecureContext) {
-                await navigator.clipboard.writeText(modelName)
-                markCopied()
-                return
-            }
+            toast.success("Model name copied to clipboard")
+            setTimeout(() => setCopiedModelUid(null), 2000)
         } catch {
-            // fallback below
-        }
-
-        try {
-            const textArea = document.createElement("textarea")
-            textArea.value = modelName
-            textArea.setAttribute("readonly", "")
-            textArea.style.position = "fixed"
-            textArea.style.opacity = "0"
-            textArea.style.pointerEvents = "none"
-            document.body.appendChild(textArea)
-            textArea.select()
-            textArea.setSelectionRange(0, textArea.value.length)
-            const copied = document.execCommand("copy")
-            document.body.removeChild(textArea)
-
-            if (!copied) throw new Error("execCommand copy failed")
-            markCopied()
-        } catch {
-            setError(t('models.copyFail'))
+            toast.error("Failed to copy")
         }
     }
 
-    const filtered = filter === "all" ? models : models.filter((m) => m.state === filter)
+    const filtered = models.filter((m) => {
+        const matchesState = filter === "all" || m.state === filter
+        const matchesSearch = m.model_uid.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            m.model_name.toLowerCase().includes(searchQuery.toLowerCase())
+        return matchesState && matchesSearch
+    })
 
     return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="flex items-center justify-between">
+        <div className="space-y-8 animate-in fade-in duration-500">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
-                    <h2 className="text-2xl font-bold text-foreground">{t('models.title')}</h2>
-                    <p className="text-sm text-muted-foreground mt-1">{t('models.subtitle')}</p>
+                    <h2 className="text-3xl font-bold tracking-tight font-mono uppercase text-foreground">{t('models.title')}</h2>
+                    <p className="text-muted-foreground mt-2">{t('models.subtitle')}</p>
                 </div>
-                <Button
-                    onClick={onOpenLoadDialog}
-                    className="bg-primary hover:bg-primary/90 rounded-xl shadow-sm px-5"
-                >
+                <Button className="bg-primary text-primary-foreground rim-light h-11 px-6 font-bold uppercase tracking-widest text-xs">
                     <Plus className="mr-2 h-4 w-4" />
                     {t('models.loadModel')}
                 </Button>
             </div>
 
-            {/* State filter */}
-            <div className="flex items-center gap-2 flex-wrap">
-                {(["all", "running", "stopped", "downloading", "starting", "degraded", "failed", "stopping"] as const).map((s) => {
-                    const count = s === "all" ? models.length : models.filter((m) => m.state === s).length
-                    if (s !== "all" && count === 0) return null
-                    return (
-                        <button
-                            key={s}
-                            onClick={() => setFilter(s)}
-                            className={cn(
-                                "px-3 py-1.5 rounded-xl text-xs font-bold transition-colors border",
-                                filter === s
-                                    ? "bg-primary text-primary-foreground border-primary"
-                                    : "bg-transparent text-muted-foreground border-border hover:bg-accent"
-                            )}
-                        >
-                            {s === "all" ? t('common.all') : t(`state.${s}`)} ({count})
-                        </button>
-                    )
-                })}
-            </div>
-
-            {error && <p className="text-destructive text-sm bg-destructive/5 rounded-xl px-4 py-2">{error}</p>}
-
-            <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
-                <div className="px-6 py-5 border-b border-border bg-accent/30 flex items-center justify-between">
-                    <div>
-                        <h3 className="text-lg font-bold text-foreground tracking-tight">{t('models.tableTitle')}</h3>
-                        <p className="text-xs font-medium text-muted-foreground">{t('models.tableDesc')}</p>
+            {/* Toolbar */}
+            <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-card/40 backdrop-blur-xl border border-border p-4 rounded-xl">
+                <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 bg-black/20 px-3 py-1.5 rounded-lg border border-border/50">
+                        <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                        {(["all", "running", "stopped", "downloading", "failed"] as const).map((s) => (
+                            <button
+                                key={s}
+                                onClick={() => setFilter(s)}
+                                className={cn(
+                                    "px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all",
+                                    filter === s
+                                        ? "bg-primary text-primary-foreground shadow-sm"
+                                        : "text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                {s === "all" ? t('common.all') : t(`state.${s}`)}
+                            </button>
+                        ))}
                     </div>
-                    <Badge variant="outline" className="font-bold border-primary/20 text-primary uppercase h-6">
-                        {filtered.length} {t('common.total')}
-                    </Badge>
                 </div>
 
+                <div className="relative w-full md:w-64 group">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                    <input
+                        type="text"
+                        placeholder="SEARCH MODELS..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-black/20 border border-border/50 rounded-lg pl-10 pr-4 py-2 text-xs font-mono focus:outline-none focus:border-primary/50 transition-all"
+                    />
+                </div>
+            </div>
+
+            {/* Models Grid/Table */}
+            <div className="bg-card/40 backdrop-blur-xl border border-border rounded-xl overflow-hidden">
                 <Table>
-                    <TableHeader>
-                        <TableRow className="bg-muted hover:bg-muted border-b border-border">
-                            <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('models.model')}</TableHead>
-                            <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('models.state')}</TableHead>
-                            <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('models.replicas')}</TableHead>
-                            <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('models.engine')}</TableHead>
-                            <TableHead className="text-right text-[11px] font-bold text-muted-foreground uppercase py-4">{t('common.actions')}</TableHead>
+                    <TableHeader className="bg-black/20">
+                        <TableRow className="border-border/50 hover:bg-transparent">
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground px-6 py-4">Model Identity</TableHead>
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Status</TableHead>
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Provisioning</TableHead>
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Engine</TableHead>
+                            <TableHead className="text-[10px] uppercase font-bold text-muted-foreground text-right pr-6">Management</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {initialLoading ? (
                             <TableRow>
-                                <TableCell colSpan={5} className="h-48 text-center">
-                                    <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2 text-muted-foreground" />
-                                    <p className="text-sm text-muted-foreground">{t('models.loading')}</p>
+                                <TableCell colSpan={5} className="h-64 text-center">
+                                    <div className="flex flex-col items-center gap-3 opacity-50">
+                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                        <p className="text-[10px] font-mono uppercase tracking-widest">{t('models.loading')}</p>
+                                    </div>
                                 </TableCell>
                             </TableRow>
                         ) : filtered.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={5} className="h-48 text-center">
-                                    <div className="flex flex-col items-center justify-center opacity-40">
-                                        <Box className="h-12 w-12 mb-2" />
-                                        <p className="text-sm font-bold text-muted-foreground">{t('models.empty')}</p>
+                                <TableCell colSpan={5} className="h-64 text-center">
+                                    <div className="flex flex-col items-center gap-3 opacity-30">
+                                        <Box className="h-12 w-12" />
+                                        <p className="text-[10px] font-mono uppercase tracking-widest">{t('models.empty')}</p>
                                     </div>
                                 </TableCell>
                             </TableRow>
                         ) : (
                             filtered.map((model) => {
-                                const sb = STATE_BADGE[model.state]
+                                const config = STATE_CONFIG[model.state] || STATE_CONFIG.stopped
                                 const isActing = acting === model.model_uid
                                 return (
-                                    <TableRow
-                                        key={model.model_uid}
-                                        className="group hover:bg-accent/20 transition-colors"
-                                    >
-                                        <TableCell className="py-5">
-                                            <div className="font-bold text-sm tracking-tight inline-flex items-center gap-1">
-                                                {model.model_uid}
-                                            </div>
-                                            <div className="mt-1.5 flex items-center gap-1.5">
-                                                <span className="text-[10px] font-mono text-muted-foreground truncate max-w-[220px] bg-accent/40 inline-block px-1.5 rounded select-text" title={model.model_name}>
-                                                    {model.model_name}
-                                                </span>
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
-                                                    onClick={() => copyModelName(model.model_uid, model.model_name)}
-                                                    aria-label={`Copy model name ${model.model_name}`}
-                                                >
-                                                    {copiedModelUid === model.model_uid ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-                                                </Button>
+                                    <TableRow key={model.model_uid} className="border-border/40 hover:bg-white/5 transition-colors group">
+                                        <TableCell className="px-6 py-5">
+                                            <div className="flex flex-col gap-1.5">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-mono text-sm font-bold group-hover:text-primary transition-colors">{model.model_uid}</span>
+                                                    {copiedModelUid === model.model_uid ? (
+                                                        <Check className="h-3 w-3 text-success" />
+                                                    ) : (
+                                                        <Copy
+                                                            className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-pointer hover:text-foreground transition-all"
+                                                            onClick={() => copyModelName(model.model_uid, model.model_name)}
+                                                        />
+                                                    )}
+                                                </div>
+                                                <span className="text-[10px] text-muted-foreground/60 font-mono truncate max-w-[300px]">{model.model_name}</span>
                                             </div>
                                         </TableCell>
                                         <TableCell>
-                                            <Badge className={cn("text-[11px] font-bold", sb.cls)}>{t(sb.key)}</Badge>
-                                            {model.state === "downloading" && (
-                                                <Progress value={30} className="h-1 mt-1.5 w-24" />
-                                            )}
+                                            <div className="flex flex-col gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <div className={cn("w-1.5 h-1.5 rounded-full", config.animate ? "animate-pulse" : "", config.color.split(' ')[0])} />
+                                                    <span className={cn("text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border", config.color)}>
+                                                        {t(config.key)}
+                                                    </span>
+                                                </div>
+                                                {model.state === "downloading" && (
+                                                    <Progress value={45} className="h-1 w-24 bg-white/5" />
+                                                )}
+                                            </div>
                                         </TableCell>
                                         <TableCell>
-                                            <span className="text-sm font-bold">{model.replicas.ready}</span>
-                                            <span className="text-xs text-muted-foreground"> / {model.replicas.desired}</span>
-                                            {model.replicas.unhealthy > 0 && (
-                                                <span className="text-[10px] text-destructive ml-1">({model.replicas.unhealthy} {t('models.unhealthy')})</span>
-                                            )}
+                                            <div className="flex items-baseline gap-1 font-mono">
+                                                <span className="text-sm font-bold text-foreground">{model.replicas.ready}</span>
+                                                <span className="text-[10px] text-muted-foreground">/ {model.replicas.desired}</span>
+                                                {model.replicas.unhealthy > 0 && (
+                                                    <Badge variant="destructive" className="ml-2 text-[9px] h-4">{model.replicas.unhealthy} UNHEALTHY</Badge>
+                                                )}
+                                            </div>
                                         </TableCell>
                                         <TableCell>
-                                            <span className="text-xs font-medium">{model.engine_type ?? "default"}</span>
+                                            <Badge variant="outline" className="text-[10px] font-mono border-border/50 text-muted-foreground uppercase">{model.engine_type || "vLLM"}</Badge>
                                         </TableCell>
-                                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                                            <div className="flex items-center justify-end gap-1">
+                                        <TableCell className="text-right pr-6">
+                                            <div className="flex items-center justify-end gap-2">
                                                 {(model.state === "stopped" || model.state === "failed") && (
                                                     <Button
                                                         variant="ghost" size="sm"
-                                                        className="text-success font-bold text-xs rounded-xl h-8"
-                                                        onClick={() => act(model.model_uid, () => v2.startModel(model.model_uid, {}, token))}
+                                                        className="h-8 w-8 p-0 hover:bg-success/20 hover:text-success"
+                                                        onClick={() => act(model.model_uid, "START", () => v2.startModel(model.model_uid, {}, token || ''))}
                                                         disabled={isActing}
                                                     >
-                                                        <Play className="h-3.5 w-3.5 mr-1" /> {t('models.start')}
+                                                        <Play className="h-4 w-4" />
                                                     </Button>
                                                 )}
                                                 {model.state === "running" && (
                                                     <Button
-                                                        variant="outline" size="sm"
-                                                        className="text-destructive border-destructive/30 hover:bg-destructive hover:text-destructive-foreground font-bold text-xs rounded-xl h-8"
-                                                        onClick={() => act(model.model_uid, () => v2.stopModel(model.model_uid, token))}
+                                                        variant="ghost" size="sm"
+                                                        className="h-8 w-8 p-0 hover:bg-destructive/20 hover:text-destructive"
+                                                        onClick={() => act(model.model_uid, "STOP", () => v2.stopModel(model.model_uid, token || ''))}
                                                         disabled={isActing}
                                                     >
-                                                        <Square className="h-3.5 w-3.5 mr-1" /> {t('models.stopService')}
+                                                        <Square className="h-4 w-4" />
                                                     </Button>
                                                 )}
                                                 <Button
                                                     variant="ghost" size="sm"
-                                                    className="font-bold text-xs rounded-xl h-8"
-                                                    onClick={() => onSelectModel?.(model.model_uid)}
+                                                    className="h-8 w-8 p-0 hover:bg-white/10"
                                                 >
-                                                    <ExternalLink className="h-3.5 w-3.5 mr-1" /> {t('common.details')}
+                                                    <ExternalLink className="h-4 w-4" />
                                                 </Button>
-                                                {(model.state === "stopped" || model.state === "failed") && (
-                                                    <Button
-                                                        variant="ghost" size="sm"
-                                                        className="text-destructive font-bold text-xs hover:text-white hover:bg-destructive rounded-xl h-8"
-                                                        onClick={() => act(model.model_uid, () => v2.deleteModel(model.model_uid, token))}
-                                                        disabled={isActing}
-                                                    >
-                                                        <Trash2 className="h-3.5 w-3.5 mr-1" /> {t('models.delete')}
-                                                    </Button>
-                                                )}
-                                                {isActing && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                                                <Button
+                                                    variant="ghost" size="sm"
+                                                    className="h-8 w-8 p-0 hover:bg-destructive/20 hover:text-destructive"
+                                                    disabled={isActing}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
                                             </div>
                                         </TableCell>
                                     </TableRow>

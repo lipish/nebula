@@ -1,853 +1,380 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { Search, ArrowLeft, ArrowRight, Download, Heart, Tag, Cpu, Server, Loader2, Sparkles, AlertTriangle, Check, LayoutTemplate } from "lucide-react"
+import { useEffect } from "react"
+import { Search, ArrowLeft, ArrowRight, Cpu, Server, Check, Globe, Settings2, Rocket, X, Info } from "lucide-react"
 import {
     Dialog,
     DialogContent,
-    DialogHeader,
     DialogTitle,
-    DialogDescription,
-    DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { apiGet, apiGetWithParams, v2 } from "@/lib/api"
-import type { ClusterStatus, EngineImage, ModelLoadRequest, ModelSearchResult, ModelTemplate } from "@/lib/types"
-import { useI18n } from "@/lib/i18n"
+import { v2 } from "@/lib/api"
+import { useLoadModelStore } from "@/store/useLoadModelStore"
+import { useClusterOverview } from "@/hooks/useClusterOverview"
+import { useImages } from "@/hooks/useImages"
+import { Label } from "@/components/ui/label"
+import { toast } from "sonner"
+import type { ModelLoadRequest } from "@/lib/types"
 
-type Step = "search" | "configure" | "templates"
-type Source = "huggingface" | "modelscope"
+type Step = 'source' | 'search' | 'hardware' | 'engine' | 'review'
 
-interface PopularModel {
-    id: string
-    description: string
-    tags: string[]
-}
-
-const POPULAR_MODELS: Record<Source, PopularModel[]> = {
-    huggingface: [
-        { id: "Qwen/Qwen2.5-7B-Instruct", description: "Qwen 2.5 7B chat model", tags: ["7B", "chat"] },
-        { id: "Qwen/Qwen2.5-14B-Instruct", description: "Qwen 2.5 14B chat model", tags: ["14B", "chat"] },
-        { id: "Qwen/Qwen2.5-72B-Instruct", description: "Qwen 2.5 72B chat model", tags: ["72B", "chat"] },
-        { id: "Qwen/Qwen3-8B", description: "Qwen 3 8B model", tags: ["8B", "new"] },
-        { id: "Qwen/Qwen3-32B", description: "Qwen 3 32B model", tags: ["32B", "new"] },
-        { id: "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", description: "DeepSeek R1 distilled 7B", tags: ["7B", "reasoning"] },
-        { id: "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", description: "DeepSeek R1 distilled 32B", tags: ["32B", "reasoning"] },
-        { id: "meta-llama/Llama-3.1-8B-Instruct", description: "Meta Llama 3.1 8B", tags: ["8B", "chat"] },
-        { id: "meta-llama/Llama-3.1-70B-Instruct", description: "Meta Llama 3.1 70B", tags: ["70B", "chat"] },
-        { id: "mistralai/Mistral-7B-Instruct-v0.3", description: "Mistral 7B v0.3", tags: ["7B", "chat"] },
-    ],
-    modelscope: [
-        { id: "Qwen/Qwen2.5-7B-Instruct", description: "Qwen 2.5 7B 对话模型", tags: ["7B", "chat"] },
-        { id: "Qwen/Qwen2.5-14B-Instruct", description: "Qwen 2.5 14B 对话模型", tags: ["14B", "chat"] },
-        { id: "Qwen/Qwen2.5-72B-Instruct", description: "Qwen 2.5 72B 对话模型", tags: ["72B", "chat"] },
-        { id: "Qwen/Qwen3-8B", description: "Qwen 3 8B 模型", tags: ["8B", "new"] },
-        { id: "Qwen/Qwen3-32B", description: "Qwen 3 32B 模型", tags: ["32B", "new"] },
-        { id: "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", description: "DeepSeek R1 蒸馏 7B", tags: ["7B", "reasoning"] },
-        { id: "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", description: "DeepSeek R1 蒸馏 32B", tags: ["32B", "reasoning"] },
-        { id: "LLM-Research/Meta-Llama-3.1-8B-Instruct", description: "Meta Llama 3.1 8B", tags: ["8B", "chat"] },
-        { id: "AI-ModelScope/Mistral-7B-Instruct-v0.3", description: "Mistral 7B v0.3", tags: ["7B", "chat"] },
-    ],
-}
-
-interface LoadModelDialogProps {
-    open: boolean
-    onOpenChange: (open: boolean) => void
-    overview: ClusterStatus
-    usedGpus: Map<string, Set<number>>
-    pct: (used: number, total: number) => number
-    token: string
-    onSubmit: (form: ModelLoadRequest, gpu: { nodeId: string; gpuIndices: number[] }) => Promise<void>
-    onUnloadRequestId: (requestId: string) => Promise<void>
-}
-
-function formatDownloads(n: number): string {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-    return String(n)
-}
-
-function generateModelUid(modelId: string): string {
-    const parts = modelId.split("/")
-    const name = parts[parts.length - 1] || modelId
-    return name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "")
-}
-
-export function LoadModelDialog({
-    open,
-    onOpenChange,
-    overview,
-    usedGpus,
-    pct,
-    token,
-    onSubmit,
-    onUnloadRequestId,
-}: LoadModelDialogProps) {
-    const { t } = useI18n()
-    const [step, setStep] = useState<Step>("search")
-    const [source, setSource] = useState<Source>("huggingface")
-    const [query, setQuery] = useState("")
-    const [results, setResults] = useState<ModelSearchResult[]>([])
-    const [searching, setSearching] = useState(false)
-    const [searchError, setSearchError] = useState<string | null>(null)
-    const [selectedModel, setSelectedModel] = useState<ModelSearchResult | null>(null)
-    const [submitting, setSubmitting] = useState(false)
-
-    const [form, setForm] = useState<ModelLoadRequest>({
-        model_name: "",
-        model_uid: "",
-        replicas: 1,
-        config: {},
-        engine_type: "vllm",
-    })
-    const [selectedNode, setSelectedNode] = useState<string | null>(null)
-    const [selectedGpuIndices, setSelectedGpuIndices] = useState<Set<number>>(new Set())
-    const [engineImages, setEngineImages] = useState<EngineImage[]>([])
-    const [templates, setTemplates] = useState<ModelTemplate[]>([])
-    const [loadingTemplates, setLoadingTemplates] = useState(false)
-    const [deployingTemplate, setDeployingTemplate] = useState<string | null>(null)
-
-    const requestIdByModelUid = (() => {
-        const m = new Map<string, string>()
-        for (const r of (overview.model_requests ?? [])) {
-            const rid = (r.id ?? "").toString()
-            const uid = r.request?.model_uid
-            if (!rid || !uid) continue
-            const st = r.status
-            if (typeof st === "string") {
-                const s = st.toLowerCase()
-                if (s.includes("fail") || s.includes("unload")) continue
-            } else if (st && typeof st === "object") {
-                if (Object.prototype.hasOwnProperty.call(st as object, "Failed")) continue
-                if (Object.prototype.hasOwnProperty.call(st as object, "Unloaded")) continue
-            }
-            m.set(uid, rid)
-        }
-        return m
-    })()
-
-    const placementForGpu = (nodeId: string, gpuIndex: number) => {
-        for (const p of overview.placements ?? []) {
-            for (const a of p.assignments ?? []) {
-                if (a.node_id !== nodeId) continue
-                if (a.gpu_index != null && a.gpu_index === gpuIndex) return p
-                const gis = (a.gpu_indices ?? []) as number[]
-                if (Array.isArray(gis) && gis.includes(gpuIndex)) return p
-            }
-        }
-        return null
-    }
-
-    const resolveRequestId = (modelUid: string, placementRequestId?: string | null) => {
-        const rid = (placementRequestId ?? "").toString()
-        if (rid.length > 0) return rid
-        return requestIdByModelUid.get(modelUid) ?? null
-    }
-
-    const occupiedEntries = (() => {
-        const fromPlacements = new Map<string, string>()
-        for (const p of overview.placements ?? []) {
-            const rid = (p.request_id ?? "").toString()
-            if (rid.length > 0) fromPlacements.set(p.model_uid, rid)
-        }
-        if (fromPlacements.size > 0) return Array.from(fromPlacements.entries())
-
-        const fromRequests = new Map<string, string>()
-        for (const r of (overview.model_requests ?? [])) {
-            const rid = (r.id ?? "").toString()
-            if (!rid) continue
-            const uid = r.request?.model_uid
-            if (!uid) continue
-            const st = r.status
-            if (typeof st === "string") {
-                const s = st.toLowerCase()
-                if (s.includes("fail") || s.includes("unload")) continue
-            } else if (st && typeof st === "object") {
-                if (Object.prototype.hasOwnProperty.call(st as object, "Failed")) continue
-                if (Object.prototype.hasOwnProperty.call(st as object, "Unloaded")) continue
-            }
-            fromRequests.set(uid, rid)
-        }
-        return Array.from(fromRequests.entries())
-    })()
-
-    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-    const resetState = useCallback(() => {
-        setStep("search")
-        setQuery("")
-        setResults([])
-        setSearching(false)
-        setSearchError(null)
-        setSelectedModel(null)
-        setSubmitting(false)
-        setForm({ model_name: "", model_uid: "", replicas: 1, config: {}, engine_type: "vllm" })
-        setSelectedNode(null)
-        setSelectedGpuIndices(new Set())
-    }, [])
-
+export function LoadModelDialog() {
+    const { open, setOpen, step, setStep, form, updateForm, selectedNode, selectedGpuIndices, setHardware, reset } = useLoadModelStore()
+    const { data: overview, refetch: refetchOverview } = useClusterOverview()
+    const { data: imageData } = useImages()
+    
     useEffect(() => {
-        if (!open) resetState()
-    }, [open, resetState])
+        if (!open) reset()
+    }, [open, reset])
 
-    // Fetch registered engine images when dialog opens
-    useEffect(() => {
-        if (!open) return
-        apiGet<EngineImage[]>("/admin/images", token)
-            .then(setEngineImages)
-            .catch(() => setEngineImages([]))
-    }, [open, token])
+    const handleClose = () => setOpen(false)
 
-    // Fetch templates when dialog opens
-    useEffect(() => {
-        if (!open) return
-        setLoadingTemplates(true)
-        v2.listTemplates(token)
-            .then(setTemplates)
-            .catch(() => setTemplates([]))
-            .finally(() => setLoadingTemplates(false))
-    }, [open, token])
-
-    const imagesForEngine = engineImages.filter(img => img.engine_type === (form.engine_type ?? "vllm"))
-
-    const doSearch = useCallback(async (q: string, src: Source) => {
-        if (q.trim().length < 2) {
-            setResults([])
-            return
-        }
-        setSearching(true)
-        setSearchError(null)
-        try {
-            const data = await apiGetWithParams<ModelSearchResult[]>(
-                "/models/search",
-                { q: q.trim(), source: src, limit: "20" },
-                token
-            )
-            setResults(data)
-        } catch (err) {
-            setSearchError(err instanceof Error ? err.message : "Search failed")
-            setResults([])
-        } finally {
-            setSearching(false)
-        }
-    }, [token])
-
-    const handleQueryChange = useCallback((value: string) => {
-        setQuery(value)
-        if (debounceRef.current) clearTimeout(debounceRef.current)
-        debounceRef.current = setTimeout(() => {
-            doSearch(value, source)
-        }, 400)
-    }, [doSearch, source])
-
-    const handleSourceChange = useCallback((src: Source) => {
-        setSource(src)
-        if (query.trim().length >= 2) {
-            doSearch(query, src)
-        }
-    }, [doSearch, query])
-
-    const handleSelectModel = useCallback((model: ModelSearchResult) => {
-        setSelectedModel(model)
-        setForm(prev => ({
-            ...prev,
-            model_name: model.id,
-            model_uid: generateModelUid(model.id),
-        }))
-        setStep("configure")
-    }, [])
-
-    const handleEngineChange = useCallback((engineType: string) => {
-        setForm(prev => ({ ...prev, engine_type: engineType, docker_image: null }))
-    }, [])
-
-    const handleBack = useCallback(() => {
-        setStep("search")
-    }, [])
-
-    const toggleGpu = useCallback((nodeId: string, gpuIndex: number) => {
-        setSelectedGpuIndices(prev => {
-            // If switching node, reset selection
-            if (selectedNode !== nodeId) {
-                setSelectedNode(nodeId)
-                return new Set([gpuIndex])
+    const handleSubmit = async () => {
+        if (!selectedNode || selectedGpuIndices.length === 0 || !form.model_name) return
+        
+        const finalForm: ModelLoadRequest = {
+            ...form,
+            node_id: selectedNode,
+            gpu_indices: selectedGpuIndices,
+            config: {
+                ...form.config,
+                tensor_parallel_size: selectedGpuIndices.length > 1 ? selectedGpuIndices.length : undefined
             }
-            const next = new Set(prev)
-            if (next.has(gpuIndex)) {
-                next.delete(gpuIndex)
-            } else {
-                next.add(gpuIndex)
-            }
-            return next
+        }
+
+        const promise = v2.createModel(finalForm as any, '') // Token placeholder
+        toast.promise(promise, {
+            loading: 'Provisioning model hardware...',
+            success: () => {
+                setOpen(false)
+                refetchOverview()
+                return 'Model deployment initiated'
+            },
+            error: 'Deployment failed'
         })
-        if (selectedNode !== nodeId) {
-            setSelectedNode(nodeId)
-        }
-    }, [selectedNode])
-
-    const handleSubmit = useCallback(async () => {
-        if (!selectedNode || selectedGpuIndices.size === 0 || !form.model_name) return
-        const gpuIndices = Array.from(selectedGpuIndices).sort((a, b) => a - b)
-        // Auto-set tensor_parallel_size if multi-GPU
-        const finalForm = gpuIndices.length > 1
-            ? { ...form, config: { ...form.config, tensor_parallel_size: gpuIndices.length } }
-            : form
-        setSubmitting(true)
-        try {
-            await onSubmit(finalForm, { nodeId: selectedNode, gpuIndices })
-            onOpenChange(false)
-        } catch {
-            // error handled by parent
-        } finally {
-            setSubmitting(false)
-        }
-    }, [form, selectedNode, selectedGpuIndices, onSubmit, onOpenChange])
+    }
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl h-[70vh] flex flex-col overflow-hidden rounded-2xl">
-                <DialogHeader>
-                    <DialogTitle className="text-xl font-bold">
-                        {step === "search" ? t('loadDialog.title.search') : step === "templates" ? t('loadDialog.title.templates') : t('loadDialog.title.configure')}
-                    </DialogTitle>
-                    <DialogDescription>
-                        {step === "search"
-                            ? t('loadDialog.desc.search')
-                            : step === "templates"
-                                ? t('loadDialog.desc.templates')
-                                : t('loadDialog.desc.configure', { model: selectedModel?.id ?? form.model_name })}
-                    </DialogDescription>
-                </DialogHeader>
+        <Dialog open={open} onOpenChange={setOpen}>
+            <DialogContent className="max-w-4xl h-[85vh] p-0 overflow-hidden bg-card/95 backdrop-blur-2xl border-border rim-light flex flex-col sm:rounded-2xl">
+                {/* Custom Header */}
+                <div className="px-8 py-6 border-b border-border/50 flex items-center justify-between bg-white/5">
+                    <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center rim-light">
+                            <Rocket className="h-6 w-6 text-primary-foreground" />
+                        </div>
+                        <div>
+                            <DialogTitle className="text-xl font-bold font-mono uppercase tracking-tight">Provision Model</DialogTitle>
+                            <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mt-0.5">Deployment Wizard ● Step {['source', 'search', 'hardware', 'engine', 'review'].indexOf(step) + 1} of 5</p>
+                        </div>
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={handleClose} className="rounded-full hover:bg-white/10 h-8 w-8">
+                        <X className="h-4 w-4" />
+                    </Button>
+                </div>
 
-                {step === "search" && (
-                    <div className="flex flex-col gap-4 flex-1 min-h-0">
-                        {/* Source toggle + search */}
-                        <div className="flex gap-2">
-                            <div className="flex rounded-xl border border-border overflow-hidden">
-                                <button
-                                    onClick={() => handleSourceChange("huggingface")}
-                                    className={cn(
-                                        "px-3 py-1.5 text-xs font-bold transition-colors",
-                                        source === "huggingface"
-                                            ? "bg-primary text-primary-foreground"
-                                            : "bg-transparent text-muted-foreground hover:bg-accent"
-                                    )}
-                                >
-                                    🤗 HuggingFace
-                                </button>
-                                <button
-                                    onClick={() => handleSourceChange("modelscope")}
-                                    className={cn(
-                                        "px-3 py-1.5 text-xs font-bold transition-colors",
-                                        source === "modelscope"
-                                            ? "bg-primary text-primary-foreground"
-                                            : "bg-transparent text-muted-foreground hover:bg-accent"
-                                    )}
-                                >
-                                    ModelScope
-                                </button>
-                            </div>
-                            <div className="relative flex-1">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                <Input
-                                    placeholder={t('loadDialog.searchPlaceholder')}
-                                    className="pl-9 rounded-xl h-9"
-                                    value={query}
-                                    onChange={(e) => handleQueryChange(e.target.value)}
-                                    autoFocus
-                                />
-                            </div>
+                <div className="flex-1 overflow-hidden flex">
+                    {/* Stepper Sidebar */}
+                    <div className="w-64 border-r border-border/50 bg-black/20 p-6 hidden md:flex flex-col gap-8">
+                        <StepItem icon={Globe} label="Source" active={step === 'source'} completed={['search', 'hardware', 'engine', 'review'].includes(step)} />
+                        <StepItem icon={Search} label="Identity" active={step === 'search'} completed={['hardware', 'engine', 'review'].includes(step)} />
+                        <StepItem icon={Cpu} label="Hardware" active={step === 'hardware'} completed={['engine', 'review'].includes(step)} />
+                        <StepItem icon={Settings2} label="Engine" active={step === 'engine'} completed={['review'].includes(step)} />
+                        <StepItem icon={Check} label="Review" active={step === 'review'} completed={false} />
+                    </div>
+
+                    {/* Content Area */}
+                    <div className="flex-1 flex flex-col overflow-hidden bg-background/50">
+                        <div className="flex-1 overflow-y-auto p-8">
+                            {step === 'source' && <StepSource />}
+                            {step === 'search' && <StepSearch />}
+                            {step === 'hardware' && <StepHardware overview={overview} selectedNode={selectedNode} selectedGpuIndices={selectedGpuIndices} onSelect={setHardware} />}
+                            {step === 'engine' && <StepEngine form={form} updateForm={updateForm} images={imageData?.images || []} />}
+                            {step === 'review' && <StepReview form={form} node={selectedNode} gpus={selectedGpuIndices} />}
                         </div>
 
-                        {/* Results */}
-                        <div className="flex-1 overflow-y-auto min-h-0 space-y-1.5 pr-1">
-                            {searching && (
-                                <div className="flex items-center justify-center py-12 text-muted-foreground">
-                                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                                    <span className="text-sm">{t('loadDialog.searching')}</span>
-                                </div>
-                            )}
-                            {searchError && (
-                                <div className="text-center py-8 text-destructive text-sm">{searchError}</div>
-                            )}
-                            {!searching && !searchError && results.length === 0 && query.length >= 2 && (
-                                <div className="text-center py-12 text-muted-foreground text-sm">
-                                    {t('loadDialog.noModelsFound')}
-                                </div>
-                            )}
-                            {!searching && !searchError && results.length === 0 && query.length < 2 && (
-                                <div className="space-y-3">
-                                    <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                                        <Sparkles className="h-3.5 w-3.5" />
-                                        {t('loadDialog.popularModels')}
-                                    </div>
-                                    <div className="grid gap-1.5">
-                                        {POPULAR_MODELS[source].map((model) => (
-                                            <button
-                                                key={model.id}
-                                                onClick={() => handleSelectModel({
-                                                    id: model.id,
-                                                    name: model.id,
-                                                    author: model.id.split("/")[0] || null,
-                                                    downloads: 0,
-                                                    likes: 0,
-                                                    tags: model.tags,
-                                                    pipeline_tag: "text-generation",
-                                                    source,
-                                                })}
-                                                className="w-full text-left rounded-xl border border-border p-2.5 hover:border-primary/40 hover:bg-accent/30 transition-all group flex items-center justify-between"
-                                            >
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="text-sm font-bold text-foreground truncate">{model.id}</p>
-                                                        {model.tags.map((tag) => (
-                                                            <Badge key={tag} variant="secondary" className="text-[9px] h-4 px-1.5 font-medium shrink-0">
-                                                                {tag}
-                                                            </Badge>
-                                                        ))}
-                                                    </div>
-                                                    <p className="text-[11px] text-muted-foreground mt-0.5">{model.description}</p>
-                                                </div>
-                                                <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2" />
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                            {!searching && results.map((model) => (
-                                <button
-                                    key={`${model.source}-${model.id}`}
-                                    onClick={() => handleSelectModel(model)}
-                                    className="w-full text-left rounded-xl border border-border p-3 hover:border-primary/40 hover:bg-accent/30 transition-all group"
-                                >
-                                    <div className="flex items-start justify-between gap-2">
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-bold text-foreground truncate">{model.id}</p>
-                                            {model.author && (
-                                                <p className="text-[11px] text-muted-foreground mt-0.5">{model.author}</p>
-                                            )}
-                                        </div>
-                                        <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity mt-0.5 shrink-0" />
-                                    </div>
-                                    <div className="flex items-center gap-3 mt-2">
-                                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                                            <Download className="h-3 w-3" />
-                                            {formatDownloads(model.downloads)}
-                                        </span>
-                                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                                            <Heart className="h-3 w-3" />
-                                            {formatDownloads(model.likes)}
-                                        </span>
-                                        {model.pipeline_tag && (
-                                            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                                                <Tag className="h-3 w-3" />
-                                                {model.pipeline_tag}
-                                            </span>
-                                        )}
-                                    </div>
-                                    {model.tags.length > 0 && (
-                                        <div className="flex flex-wrap gap-1 mt-2">
-                                            {model.tags.slice(0, 5).map((tag) => (
-                                                <Badge key={tag} variant="secondary" className="text-[9px] h-4 px-1.5 font-medium">
-                                                    {tag}
-                                                </Badge>
-                                            ))}
-                                            {model.tags.length > 5 && (
-                                                <Badge variant="secondary" className="text-[9px] h-4 px-1.5 font-medium">
-                                                    +{model.tags.length - 5}
-                                                </Badge>
-                                            )}
-                                        </div>
-                                    )}
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Manual entry + templates fallback */}
-                        <div className="border-t border-border/50 pt-3 flex items-center justify-between">
-                            <button
+                        {/* Footer Controls */}
+                        <div className="px-8 py-6 border-t border-border/50 bg-black/20 flex justify-between items-center">
+                            <Button 
+                                variant="ghost" 
                                 onClick={() => {
-                                    setSelectedModel(null)
-                                    setStep("configure")
+                                    const steps: Step[] = ['source', 'search', 'hardware', 'engine', 'review']
+                                    const idx = steps.indexOf(step)
+                                    if (idx > 0) setStep(steps[idx - 1])
                                 }}
-                                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                disabled={step === 'source'}
+                                className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
                             >
-                                {t('loadDialog.manualEntry')}
-                            </button>
-                            <button
-                                onClick={() => setStep("templates")}
-                                className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary/80 transition-colors"
-                            >
-                                <LayoutTemplate className="h-3.5 w-3.5" />
-                                {t('loadDialog.fromTemplate')}
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {step === "templates" && (
-                    <div className="flex flex-col gap-4 flex-1 min-h-0">
-                        <button
-                            onClick={() => setStep("search")}
-                            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
-                        >
-                            <ArrowLeft className="h-3.5 w-3.5" /> {t('loadDialog.backToSearch')}
-                        </button>
-                        <div className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1">
-                            {loadingTemplates && (
-                                <div className="flex items-center justify-center py-12 text-muted-foreground">
-                                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                                    <span className="text-sm">{t('loadDialog.loadingTemplates')}</span>
-                                </div>
-                            )}
-                            {!loadingTemplates && templates.length === 0 && (
-                                <div className="text-center py-12 text-muted-foreground text-sm">
-                                    {t('loadDialog.noTemplates')}
-                                </div>
-                            )}
-                            {!loadingTemplates && (() => {
-                                const grouped = new Map<string, ModelTemplate[]>()
-                                for (const t of templates) {
-                                    const cat = t.category ?? "other"
-                                    if (!grouped.has(cat)) grouped.set(cat, [])
-                                    grouped.get(cat)!.push(t)
-                                }
-                                return Array.from(grouped.entries()).map(([cat, items]) => (
-                                    <div key={cat}>
-                                        <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
-                                            {cat}
-                                        </h4>
-                                        <div className="space-y-1.5">
-                                            {items.map((tmpl) => (
-                                                <button
-                                                    key={tmpl.template_id}
-                                                    disabled={deployingTemplate !== null}
-                                                    onClick={async () => {
-                                                        setDeployingTemplate(tmpl.template_id)
-                                                        try {
-                                                            await v2.deployTemplate(tmpl.template_id, {}, token)
-                                                            onOpenChange(false)
-                                                        } catch (err) {
-                                                            setSearchError(err instanceof Error ? err.message : t('loadDialog.deployFailed'))
-                                                        } finally {
-                                                            setDeployingTemplate(null)
-                                                        }
-                                                    }}
-                                                    className="w-full text-left rounded-xl border border-border p-3 hover:border-primary/40 hover:bg-accent/30 transition-all group disabled:opacity-50"
-                                                >
-                                                    <div className="flex items-start justify-between gap-2">
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="text-sm font-bold text-foreground">{tmpl.name}</p>
-                                                            <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">{tmpl.model_name}</p>
-                                                            {tmpl.description && (
-                                                                <p className="text-[11px] text-muted-foreground mt-1">{tmpl.description}</p>
-                                                            )}
-                                                        </div>
-                                                        <div className="flex items-center gap-2 shrink-0">
-                                                            {tmpl.engine_type && (
-                                                                <Badge variant="secondary" className="text-[9px]">{tmpl.engine_type}</Badge>
-                                                            )}
-                                                            {deployingTemplate === tmpl.template_id ? (
-                                                                <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                                                            ) : (
-                                                                <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))
-                            })()}
-                        </div>
-                        {searchError && (
-                            <p className="text-destructive text-sm">{searchError}</p>
-                        )}
-                    </div>
-                )}
-
-                {step === "configure" && (
-                    <div className="flex flex-col gap-6 flex-1 min-h-0 overflow-y-auto pr-1">
-                        {/* Back button */}
-                        <button
-                            onClick={handleBack}
-                            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
-                        >
-                            <ArrowLeft className="h-3 w-3" />
-                            {t('loadDialog.backToSearch')}
-                        </button>
-
-                        {/* GPU selection */}
-                        <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{t('loadDialog.targetHardware')}</label>
-                                {selectedGpuIndices.size > 1 && (
-                                    <Badge variant="secondary" className="text-[10px] font-bold">
-                                        {t('loadDialog.gpuTensorParallel', { count: selectedGpuIndices.size })}
-                                    </Badge>
-                                )}
-                            </div>
-                            <div className="text-[10px] text-muted-foreground/70">
-                                {t('loadDialog.vramHint')}
-                            </div>
-
-                            {(occupiedEntries.length > 0 || usedGpus.size > 0) && (
-                                <div className="rounded-xl border border-border/60 bg-background p-3">
-                                    <div className="flex items-center justify-between">
-                                        <div className="text-[11px] font-bold text-muted-foreground/80">{t('loadDialog.occupiedModels')}</div>
-                                        <div className="text-[10px] text-muted-foreground/70">{t('loadDialog.unloadToFreeGpus')}</div>
-                                    </div>
-                                    <div className="mt-2 space-y-2">
-                                        {occupiedEntries.map(([modelUid, requestId]) => (
-                                            <div key={modelUid} className="flex items-center justify-between gap-2">
-                                                <div className="text-[11px] font-mono text-foreground truncate">{modelUid}</div>
-                                                <Button
-                                                    variant="secondary"
-                                                    size="sm"
-                                                    className="h-7 rounded-lg text-[10px] font-bold"
-                                                    onClick={async () => {
-                                                        await onUnloadRequestId(requestId)
-                                                    }}
-                                                    disabled={submitting}
-                                                >
-                                                    {t('loadDialog.unload')}
-                                                </Button>
-                                            </div>
-                                        ))}
-                                        {occupiedEntries.length === 0 && (
-                                            <div className="text-[10px] text-muted-foreground/70">
-                                                {t('loadDialog.noUnloadablePlacements')}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="grid gap-4 md:grid-cols-2">
-                                {overview.nodes.map((node) => {
-                                    const isThisNode = selectedNode === node.node_id
-                                    return (
-                                        <div key={node.node_id} className="space-y-2">
-                                            <p className="text-[11px] font-bold text-muted-foreground/80 flex items-center gap-1.5">
-                                                <Server className="h-3 w-3" />
-                                                {node.node_id.toUpperCase()}
-                                            </p>
-                                            <div className="grid gap-2 p-0.5">
-                                                {node.gpus.map((gpu) => {
-                                                    const isUsed = usedGpus.get(node.node_id)?.has(gpu.index) ?? false
-                                                    const isSel = isThisNode && selectedGpuIndices.has(gpu.index)
-                                                    const usage = pct(gpu.memory_used_mb, gpu.memory_total_mb)
-                                                    const freeMb = gpu.memory_total_mb - gpu.memory_used_mb
-                                                    const freeGb = (freeMb / 1024).toFixed(1)
-                                                    const totalGb = (gpu.memory_total_mb / 1024).toFixed(1)
-                                                    const lowVram = freeMb < 4096
-                                                    const usedPlacement = isUsed ? placementForGpu(node.node_id, gpu.index) : null
-                                                    const usedModelUid = usedPlacement?.model_uid ?? null
-                                                    const unloadRequestId = usedModelUid ? resolveRequestId(usedModelUid, usedPlacement?.request_id ?? null) : null
-                                                    return (
-                                                        <div key={gpu.index} className="flex items-center gap-2">
-                                                            <button
-                                                                onClick={() => {
-                                                                    if (isUsed && !isSel) return
-                                                                    toggleGpu(node.node_id, gpu.index)
-                                                                }}
-                                                                className={cn(
-                                                                    "flex-1 flex items-center justify-between rounded-xl border p-3 text-left transition-all shadow-sm",
-                                                                    isUsed && !isSel && "opacity-60 cursor-not-allowed",
-                                                                    isSel
-                                                                        ? "border-primary bg-primary/[0.03] ring-1 ring-primary"
-                                                                        : "border-border hover:border-primary/40 hover:bg-accent/30"
-                                                                )}
-                                                            >
-                                                                <div className="flex-1">
-                                                                    <div className="flex items-center justify-between mb-1.5">
-                                                                        <div className="flex items-center gap-1.5">
-                                                                            <Cpu className={cn("h-3.5 w-3.5", isSel ? "text-primary" : "text-muted-foreground")} />
-                                                                            <span className="text-xs font-bold">GPU {gpu.index}</span>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className={cn("text-[10px] font-bold", lowVram ? "text-destructive" : "text-muted-foreground")}>
-                                                                                {t('loadDialog.freeTotal', { free: freeGb, total: totalGb })}
-                                                                            </span>
-                                                                            <span className="text-[10px] font-bold text-muted-foreground">{t('loadDialog.usedPct', { value: usage })}</span>
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="h-1 w-full bg-accent rounded-full overflow-hidden">
-                                                                        <div
-                                                                            className={cn("h-full rounded-full transition-all",
-                                                                                usage > 80 ? "bg-destructive" : (isSel ? "bg-primary" : "bg-primary/50")
-                                                                            )}
-                                                                            style={{ width: `${usage}%` }}
-                                                                        />
-                                                                    </div>
-                                                                    {lowVram && isSel && (
-                                                                        <div className="flex items-center gap-1 mt-1.5 text-[10px] text-amber-500">
-                                                                            <AlertTriangle className="h-3 w-3" />
-                                                                            {t('loadDialog.lowVram')}
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                                {isUsed && !isSel && (
-                                                                    <Badge className="ml-2 text-[9px] font-bold bg-secondary text-secondary-foreground border-0">{t('loadDialog.inUse')}</Badge>
-                                                                )}
-                                                                {isSel && (
-                                                                    <div className="ml-2 h-4 w-4 rounded-full bg-primary flex items-center justify-center">
-                                                                        <Check className="h-2.5 w-2.5 text-primary-foreground" />
-                                                                    </div>
-                                                                )}
-                                                            </button>
-                                                            {isUsed && unloadRequestId && !isSel && (
-                                                                <Button
-                                                                    variant="secondary"
-                                                                    size="sm"
-                                                                    className="h-7 rounded-lg text-[10px] font-bold shrink-0"
-                                                                    onClick={async () => {
-                                                                        await onUnloadRequestId(unloadRequestId)
-                                                                    }}
-                                                                    disabled={submitting}
-                                                                >
-                                                                    {t('loadDialog.unload')}
-                                                                </Button>
-                                                            )}
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                            {selectedGpuIndices.size > 1 && (
-                                <p className="text-[11px] text-muted-foreground">
-                                    {t('loadDialog.multiGpuAutoTensor', { count: selectedGpuIndices.size })}
-                                </p>
-                            )}
-                        </div>
-
-                        {/* Engine selection */}
-                        <div className="space-y-3">
-                            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{t('models.engine')}</label>
-                            <div className="flex gap-2">
-                                <div className="flex rounded-xl border border-border overflow-hidden">
-                                    {["vllm", "sglang", "virtual"].map((eng) => (
-                                        <button
-                                            key={eng}
-                                            onClick={() => handleEngineChange(eng)}
-                                            className={cn(
-                                                "px-4 py-1.5 text-xs font-bold transition-colors",
-                                                form.engine_type === eng
-                                                    ? "bg-primary text-primary-foreground"
-                                                    : "bg-transparent text-muted-foreground hover:bg-accent"
-                                            )}
-                                        >
-                                            {eng === "vllm" ? "vLLM" : eng === "sglang" ? "SGLang" : "Virtual"}
-                                        </button>
-                                    ))}
-                                </div>
-                                {imagesForEngine.length > 0 && (
-                                    <select
-                                        className="flex-1 rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary"
-                                        value={form.docker_image ?? ""}
-                                        onChange={(e) => setForm(prev => ({ ...prev, docker_image: e.target.value || null }))}
-                                    >
-                                        <option value="">{t('loadDialog.defaultNodeCli')}</option>
-                                        {imagesForEngine.map((img) => (
-                                            <option key={img.id} value={img.image}>
-                                                {img.image}{img.description ? ` — ${img.description}` : ""}
-                                            </option>
-                                        ))}
-                                    </select>
-                                )}
-                            </div>
-                            {form.engine_type !== 'virtual' && imagesForEngine.length === 0 && (
-                                <p className="text-[10px] text-muted-foreground/70">
-                                    {t('loadDialog.noRegisteredImages', { engine: form.engine_type === 'vllm' ? 'vLLM' : 'SGLang' })}
-                                </p>
-                            )}
-                            {form.engine_type === 'virtual' && (
-                                <p className="text-[10px] text-muted-foreground/70">
-                                    Virtual engine proxies requests to an external LLM service. Ensure VIRTUAL_ENGINE_TARGET is set on the target node.
-                                </p>
-                            )}
-                        </div>
-
-                        {/* Model config fields */}
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-bold text-muted-foreground uppercase">{t('loadDialog.modelPath')}</label>
-                                <Input
-                                    placeholder={t('loadDialog.modelPathPlaceholder')}
-                                    className="rounded-xl h-10"
-                                    value={form.model_name}
-                                    onChange={(e) => setForm({ ...form, model_name: e.target.value })}
-                                />
-                                <div className="text-[10px] text-muted-foreground/70">
-                                    {t('loadDialog.ggufHint')}
-                                </div>
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-bold text-muted-foreground uppercase">{t('loadDialog.deploymentUid')}</label>
-                                <Input
-                                    placeholder={t('loadDialog.deploymentUidPlaceholder')}
-                                    className="rounded-xl h-10 font-mono"
-                                    value={form.model_uid}
-                                    onChange={(e) => setForm({ ...form, model_uid: e.target.value })}
-                                />
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-bold text-muted-foreground uppercase">{t('models.replicas')}</label>
-                                <Input
-                                    type="number"
-                                    className="rounded-xl h-10"
-                                    value={form.replicas}
-                                    onChange={(e) => setForm({ ...form, replicas: Number(e.target.value) })}
-                                />
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-bold text-muted-foreground uppercase">{t('loadDialog.contextWindow')}</label>
-                                <Input
-                                    type="number"
-                                    placeholder="4096"
-                                    className="rounded-xl h-10 font-mono"
-                                    value={form.config?.max_model_len ?? ""}
-                                    onChange={(e) => {
-                                        const raw = e.target.value
-                                        const next = raw === "" ? undefined : Number(raw)
-                                        setForm({
-                                            ...form,
-                                            config: { ...form.config, max_model_len: next },
-                                        })
-                                    }}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {step === "configure" && (
-                    <DialogFooter className="border-t border-border/50 pt-4">
-                        <Button variant="outline" className="rounded-xl" onClick={() => onOpenChange(false)}>
-                            {t('common.cancel')}
-                        </Button>
-                        <Button
-                            className="bg-primary font-bold rounded-xl px-6"
-                            onClick={handleSubmit}
-                            disabled={!selectedNode || selectedGpuIndices.size === 0 || !form.model_name || submitting}
-                        >
-                            {submitting ? (
-                                <>
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                    {t('loadDialog.deploying')}
-                                </>
+                                <ArrowLeft className="h-3 w-3 mr-2" /> Previous Sequence
+                            </Button>
+                            
+                            {step === 'review' ? (
+                                <Button 
+                                    onClick={handleSubmit}
+                                    className="bg-primary text-primary-foreground rim-light h-10 px-8 font-bold uppercase tracking-widest text-xs"
+                                >
+                                    Execute Deployment <Rocket className="ml-2 h-4 w-4" />
+                                </Button>
                             ) : (
-                                t('loadDialog.launchModel')
+                                <Button 
+                                    onClick={() => {
+                                        const steps: Step[] = ['source', 'search', 'hardware', 'engine', 'review']
+                                        const idx = steps.indexOf(step)
+                                        if (idx < steps.length - 1) setStep(steps[idx + 1])
+                                    }}
+                                    className="bg-primary text-primary-foreground rim-light h-10 px-8 font-bold uppercase tracking-widest text-xs"
+                                >
+                                    Proceed <ArrowRight className="ml-2 h-4 w-4" />
+                                </Button>
                             )}
-                        </Button>
-                    </DialogFooter>
-                )}
+                        </div>
+                    </div>
+                </div>
             </DialogContent>
         </Dialog>
+    )
+}
+
+function StepItem({ icon: Icon, label, active, completed }: any) {
+    return (
+        <div className={cn("flex items-center gap-3 transition-colors", active ? "text-primary" : completed ? "text-success" : "text-muted-foreground")}>
+            <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center border transition-all", 
+                active ? "bg-primary/10 border-primary rim-light" : completed ? "bg-success/10 border-success/30" : "bg-white/5 border-border/50")}>
+                {completed ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-widest">{label}</span>
+        </div>
+    )
+}
+
+function StepSource() {
+    const { source, setSource, setStep } = useLoadModelStore()
+    const options = [
+        { id: 'huggingface', label: 'Hugging Face', desc: 'Pull from the global HF community hub', icon: '🤗' },
+        { id: 'modelscope', label: 'ModelScope', desc: 'Optimized models for domestic connectivity', icon: '📦' },
+        { id: 'template', label: 'Template', desc: 'Deploy from pre-configured blueprints', icon: '📋' },
+        { id: 'manual', label: 'Manual Input', desc: 'Specify local paths or direct references', icon: '⌨️' },
+    ] as const
+
+    return (
+        <div className="space-y-6">
+            <div className="space-y-1">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Select Model Origin</h3>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Identify where the model assets are located</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {options.map((opt) => (
+                    <button
+                        key={opt.id}
+                        onClick={() => { setSource(opt.id); setStep('search'); }}
+                        className={cn("text-left p-5 rounded-xl border border-border transition-all hover:bg-white/5 hover:border-primary/50 group",
+                            source === opt.id ? "bg-primary/5 border-primary/50 rim-light" : "bg-card/40")}
+                    >
+                        <div className="text-2xl mb-3">{opt.icon}</div>
+                        <p className="text-xs font-bold uppercase tracking-widest text-foreground mb-1">{opt.label}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-tight leading-relaxed">{opt.desc}</p>
+                    </button>
+                ))}
+            </div>
+        </div>
+    )
+}
+
+function StepSearch() {
+    const { source, searchQuery, setSearchQuery, updateForm } = useLoadModelStore()
+    return (
+        <div className="space-y-6">
+             <div className="space-y-1">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Specify Identity</h3>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Search registry or enter direct model reference</p>
+            </div>
+            
+            {source === 'manual' ? (
+                <div className="space-y-4">
+                    <div className="space-y-2">
+                        <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Model Path / Name</Label>
+                        <Input 
+                            className="bg-white/5 border-border/50 font-mono" 
+                            placeholder="e.g. Qwen/Qwen2.5-7B-Instruct" 
+                            onChange={(e) => updateForm({ model_name: e.target.value, model_uid: e.target.value.split('/').pop()?.toLowerCase() })}
+                        />
+                    </div>
+                </div>
+            ) : (
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input 
+                        className="pl-10 h-12 bg-white/5 border-border/50 rounded-xl font-mono text-sm" 
+                        placeholder={`SEARCH ON ${source.toUpperCase()}...`}
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                    <div className="mt-8 p-12 text-center border-2 border-dashed border-border/50 rounded-2xl opacity-50">
+                        <p className="text-[10px] font-mono uppercase tracking-widest">Registry Search Integration Active</p>
+                    </div>
+                </div>
+            )}
+        </div>
+    )
+}
+
+function StepHardware({ overview, selectedNode, selectedGpuIndices, onSelect }: any) {
+    return (
+        <div className="space-y-6">
+             <div className="space-y-1">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Hardware Allocation</h3>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Select compute nodes and specific GPU resources</p>
+            </div>
+
+            <div className="space-y-6 overflow-y-auto max-h-[40vh] pr-2">
+                {overview?.nodes.map((node: any) => (
+                    <div key={node.node_id} className="space-y-3">
+                         <div className="flex items-center gap-2 px-1">
+                            <Server className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-[10px] font-bold font-mono uppercase tracking-widest">{node.node_id}</span>
+                         </div>
+                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {node.gpus.map((gpu: any) => {
+                                const isSelected = selectedNode === node.node_id && selectedGpuIndices.includes(gpu.index)
+                                const usage = Math.round((gpu.memory_used_mb / gpu.memory_total_mb) * 100)
+                                return (
+                                    <button
+                                        key={gpu.index}
+                                        onClick={() => {
+                                            if (selectedNode !== node.node_id) onSelect(node.node_id, [gpu.index])
+                                            else {
+                                                const next = selectedGpuIndices.includes(gpu.index)
+                                                    ? selectedGpuIndices.filter((i: number) => i !== gpu.index)
+                                                    : [...selectedGpuIndices, gpu.index]
+                                                onSelect(node.node_id, next)
+                                            }
+                                        }}
+                                        className={cn("p-4 rounded-xl border text-left transition-all group",
+                                            isSelected ? "bg-primary/5 border-primary rim-light" : "bg-card/40 border-border hover:border-primary/30")}
+                                    >
+                                        <div className="flex items-center justify-between mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <Cpu className={cn("h-3.5 w-3.5", isSelected ? "text-primary" : "text-muted-foreground")} />
+                                                <span className="text-xs font-bold font-mono uppercase tracking-widest">GPU {gpu.index}</span>
+                                            </div>
+                                            <span className={cn("text-[10px] font-mono font-bold", usage > 80 ? "text-destructive" : "text-primary")}>{usage}%</span>
+                                        </div>
+                                        <Progress value={usage} className="h-1 bg-white/5" indicatorClassName={isSelected ? "bg-primary" : "bg-primary/50"} />
+                                        <div className="mt-3 flex items-center justify-between text-[9px] font-mono text-muted-foreground/60 uppercase tracking-widest">
+                                            <span>AVAIL</span>
+                                            <span>{((gpu.memory_total_mb - gpu.memory_used_mb) / 1024).toFixed(1)}GB / {(gpu.memory_total_mb / 1024).toFixed(1)}GB</span>
+                                        </div>
+                                    </button>
+                                )
+                            })}
+                         </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    )
+}
+
+function StepEngine({ form, updateForm, images }: any) {
+    return (
+        <div className="space-y-6">
+            <div className="space-y-1">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Engine Runtime</h3>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Configure inference engine and image parameters</p>
+            </div>
+
+            <div className="space-y-6">
+                <div className="space-y-3">
+                    <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Execution Backend</Label>
+                    <div className="flex gap-2 p-1 bg-black/20 rounded-xl border border-border/50 w-fit">
+                        {['vllm', 'sglang', 'virtual'].map(eng => (
+                            <button
+                                key={eng}
+                                onClick={() => updateForm({ engine_type: eng })}
+                                className={cn("px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                                    form.engine_type === eng ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                            >
+                                {eng}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="space-y-2">
+                    <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Runtime Engine Image</Label>
+                    <select
+                        className="w-full h-11 bg-white/5 border border-border/50 rounded-xl px-4 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary/30"
+                        value={form.docker_image ?? ''}
+                        onChange={(e) => updateForm({ docker_image: e.target.value || undefined })}
+                    >
+                        <option value="">System Default Implementation</option>
+                        {images.filter((img: any) => img.engine_type === form.engine_type).map((img: any) => (
+                            <option key={img.id} value={img.image}>{img.id} ({img.image})</option>
+                        ))}
+                    </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                        <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Target Replicas</Label>
+                        <Input 
+                            type="number" 
+                            className="bg-white/5 border-border/50 font-mono h-11" 
+                            value={form.replicas} 
+                            onChange={(e) => updateForm({ replicas: Number(e.target.value) })}
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Context Window (Tokens)</Label>
+                        <Input 
+                            type="number" 
+                            className="bg-white/5 border-border/50 font-mono h-11" 
+                            placeholder="4096"
+                            value={form.config?.max_model_len ?? ''}
+                            onChange={(e) => updateForm({ config: { ...form.config, max_model_len: Number(e.target.value) || undefined } })}
+                        />
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+function StepReview({ form, node, gpus }: any) {
+    return (
+        <div className="space-y-6">
+            <div className="space-y-1">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Review Manifest</h3>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Verify deployment parameters before execution</p>
+            </div>
+
+            <div className="bg-white/5 border border-border/30 rounded-2xl p-6 space-y-6 divide-y divide-border/20">
+                <ReviewItem label="Model Protocol" value={form.model_name} subValue={`UID: ${form.model_uid}`} />
+                <ReviewItem label="Compute Target" value={node} subValue={`GPU INDICES: ${gpus.join(', ')}`} pt />
+                <ReviewItem label="Runtime Engine" value={form.engine_type.toUpperCase()} subValue={form.docker_image || 'SYSTEM MANAGED'} pt />
+                <ReviewItem label="Scale & Capacity" value={`${form.replicas} REPLICAS`} subValue={`LIMIT: ${form.config?.max_model_len || 'AUTO'} TOKENS`} pt />
+            </div>
+
+            <div className="p-4 rounded-xl bg-primary/5 border border-primary/10 flex gap-4">
+                 <Info className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                 <p className="text-[10px] text-muted-foreground uppercase leading-relaxed tracking-wider">
+                    Executing this sequence will initiate hardware provisioning and artifact pulling on the target compute node. 
+                    Monitor the Models view for progress and readiness status.
+                 </p>
+            </div>
+        </div>
+    )
+}
+
+function ReviewItem({ label, value, subValue, pt }: any) {
+    return (
+        <div className={cn("flex justify-between items-start", pt && "pt-6")}>
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{label}</span>
+            <div className="text-right">
+                <p className="text-sm font-mono font-bold text-foreground uppercase">{value || 'UNSPECIFIED'}</p>
+                <p className="text-[9px] font-mono text-muted-foreground/60 uppercase mt-1 tracking-tighter">{subValue}</p>
+            </div>
+        </div>
     )
 }

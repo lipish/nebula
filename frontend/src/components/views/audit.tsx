@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from "react"
-import { Shield, RefreshCw, ChevronLeft, ChevronRight, Search } from "lucide-react"
+import { useState } from "react"
+import { Shield, RefreshCw, ChevronLeft, ChevronRight, Search, Clock, User, Fingerprint, Timer, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
   Table,
@@ -12,222 +11,166 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useI18n } from "@/lib/i18n"
+import { useAuditLogs } from "@/hooks/useAuditLogs"
+import { cn } from "@/lib/utils"
 
-interface AuditTrace {
-  id: string
-  timestamp: string
-  name: string | null
-  input: Record<string, unknown> | null
-  output: Record<string, unknown> | null
-  metadata: Record<string, unknown> | null
-  tags: string[]
-  userId: string | null
-  latency: number | null
-}
-
-interface AuditPageMeta {
-  page: number
-  limit: number
-  totalItems: number
-  totalPages: number
-}
-
-interface AuditResponse {
-  data: AuditTrace[]
-  meta: AuditPageMeta
-}
-
-interface AuditViewProps {
-  token: string
-}
-
-const BASE_URL = import.meta.env.VITE_BFF_BASE_URL || "/api"
-
-const statusColor = (code: number | undefined) => {
-  if (!code) return "secondary"
-  if (code >= 500) return "destructive"
-  if (code >= 400) return "outline"
-  return "default"
-}
-
-const fmtTs = (iso: string) => {
-  try {
-    return new Date(iso).toLocaleString()
-  } catch {
-    return iso
-  }
-}
-
-export function AuditView({ token }: AuditViewProps) {
+export function AuditView() {
   const { t } = useI18n()
-  const [data, setData] = useState<AuditTrace[]>([])
-  const [meta, setMeta] = useState<AuditPageMeta>({ page: 1, limit: 50, totalItems: 0, totalPages: 0 })
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [filterUser, setFilterUser] = useState("")
+  const { data: response, isLoading, refetch } = useAuditLogs(page, filterUser)
 
-  const fetchAudit = useCallback(async (p: number) => {
-    setLoading(true)
-    setError(null)
+  const data = response?.data || []
+  const meta = response?.meta || { page: 1, limit: 50, totalItems: 0, totalPages: 0 }
+
+  const statusColor = (code: number | undefined) => {
+    if (!code) return "bg-muted text-muted-foreground border-border"
+    if (code >= 500) return "bg-destructive/10 text-destructive border-destructive/20"
+    if (code >= 400) return "bg-warning/10 text-warning border-warning/20"
+    return "bg-success/10 text-success border-success/20"
+  }
+
+  const fmtTs = (iso: string) => {
     try {
-      const params = new URLSearchParams({ page: String(p), limit: "50" })
-      if (filterUser.trim()) params.set("userId", filterUser.trim())
-      const resp = await fetch(`${BASE_URL}/audit-logs?${params}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      if (!resp.ok) {
-        const text = await resp.text()
-        throw new Error(text || `HTTP ${resp.status}`)
-      }
-      const json: AuditResponse = await resp.json()
-      setData(json.data ?? [])
-      setMeta(json.meta ?? { page: 1, limit: 50, totalItems: 0, totalPages: 0 })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('audit.failedLoad'))
-    } finally {
-      setLoading(false)
-    }
-  }, [token, filterUser, t])
+      const d = new Date(iso)
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    } catch { return iso }
+  }
 
-  useEffect(() => { fetchAudit(page) }, [fetchAudit, page])
-
-  const getStatus = (t: AuditTrace): number | undefined => {
-    if (t.output && typeof t.output === "object" && "status" in t.output) {
-      return t.output.status as number
-    }
-    if (t.metadata && typeof t.metadata === "object" && "status" in t.metadata) {
-      return t.metadata.status as number
-    }
+  const getStatus = (t: any): number | undefined => {
+    if (t.output?.status) return t.output.status
+    if (t.metadata?.status) return t.metadata.status
     return undefined
   }
 
-  const getRole = (t: AuditTrace): string => {
-    const tag = t.tags?.find((s) => s.startsWith("role:"))
+  const getRole = (t: any): string => {
+    const tag = t.tags?.find((s: string) => s.startsWith("role:"))
     if (tag) return tag.slice(5)
-    if (t.metadata && typeof t.metadata === "object" && "role" in t.metadata) {
-      return String(t.metadata.role)
-    }
-    return "—"
-  }
-
-  const getLatencyMs = (t: AuditTrace): string => {
-    if (t.metadata && typeof t.metadata === "object" && "latency_ms" in t.metadata) {
-      return `${t.metadata.latency_ms}ms`
-    }
-    if (t.latency != null) return `${Math.round(t.latency * 1000)}ms`
-    return "—"
+    return t.metadata?.role || "SYSTEM"
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">{t('audit.title')}</h2>
-          <p className="text-sm text-muted-foreground mt-1">{t('audit.subtitle')}</p>
+          <h2 className="text-3xl font-bold tracking-tight font-mono uppercase text-foreground">{t('audit.title')}</h2>
+          <p className="text-muted-foreground mt-2 flex items-center gap-2">
+            <Lock className="h-4 w-4 text-primary" />
+            {t('audit.subtitle')}
+          </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => fetchAudit(page)}
-          disabled={loading}
-          className="gap-2"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          {t('common.refresh')}
-        </Button>
+        <div className="flex gap-3">
+          <div className="relative w-64 group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+            <input
+              type="text"
+              placeholder="SEARCH BY IDENTITY..."
+              value={filterUser}
+              onChange={(e) => setFilterUser(e.target.value)}
+              className="w-full bg-black/20 border border-border/50 rounded-lg pl-10 pr-4 py-2 text-xs font-mono focus:outline-none focus:border-primary/50 transition-all"
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            className="h-10 px-4 bg-white/5 border-border/50 font-mono text-[10px] uppercase tracking-widest"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 mr-2", isLoading ? "animate-spin" : "")} />
+            {t('common.refresh')}
+          </Button>
+        </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder={t('audit.filterByPrincipal')}
-            className="pl-9 h-9"
-            value={filterUser}
-            onChange={(e) => setFilterUser(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { setPage(1); fetchAudit(1) } }}
-          />
+      <div className="bg-card/40 backdrop-blur-xl border border-border rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between bg-white/5">
+            <h3 className="text-xs font-bold font-mono uppercase tracking-widest text-muted-foreground">Historical Operation Ledger</h3>
+            <Badge variant="outline" className="font-mono text-[10px] border-primary/20 text-primary uppercase">
+                {meta.totalItems} TOTAL ENTRIES
+            </Badge>
         </div>
-        <Badge variant="secondary" className="text-xs">
-          {meta.totalItems} {t('common.total')}
-        </Badge>
-      </div>
 
-      {error && (
-        <div className="bg-destructive/10 border border-destructive/30 text-destructive rounded-xl px-4 py-3 text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* Table */}
-      <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[180px] px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('audit.time')}</TableHead>
-              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('audit.principal')}</TableHead>
-              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('audit.role')}</TableHead>
-              <TableHead className="px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('audit.action')}</TableHead>
-              <TableHead className="w-[80px] px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('common.status')}</TableHead>
-              <TableHead className="w-[90px] text-right px-4 py-3 text-[11px] font-bold text-muted-foreground uppercase">{t('audit.latency')}</TableHead>
+          <TableHeader className="bg-black/20">
+            <TableRow className="border-border/50 hover:bg-transparent">
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground px-6 py-4">Timestamp</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Principal</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Authorization</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Action Sequence</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Status</TableHead>
+              <TableHead className="text-right text-[10px] uppercase font-bold text-muted-foreground pr-6">Performance</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.length === 0 && !loading && (
+            {data.length === 0 && !isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
-                  <Shield className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                  {t('audit.noData')}
+                <TableCell colSpan={6} className="h-64 text-center">
+                  <div className="flex flex-col items-center justify-center opacity-30 gap-3">
+                    <Shield className="h-12 w-12" />
+                    <p className="text-[10px] font-mono uppercase tracking-widest">{t('audit.noData')}</p>
+                  </div>
                 </TableCell>
               </TableRow>
+            ) : (
+                data.map((item: any) => {
+                    const status = getStatus(item)
+                    const role = getRole(item)
+                    return (
+                        <TableRow key={item.id} className="border-border/40 hover:bg-white/5 transition-colors group">
+                            <TableCell className="px-6 py-4">
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                    <Clock className="h-3 w-3" />
+                                    <span className="text-[11px] font-mono font-bold tracking-widest">{fmtTs(item.timestamp)}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-2">
+                                    <User className="h-3 w-3 text-primary/50" />
+                                    <span className="text-xs font-mono font-bold text-foreground">{item.userId || "GUEST"}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell>
+                                <Badge variant="outline" className="font-mono text-[9px] uppercase border-border/50 text-muted-foreground">
+                                    {role}
+                                </Badge>
+                            </TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-2">
+                                    <Fingerprint className="h-3 w-3 text-muted-foreground/50" />
+                                    <span className="text-[11px] font-mono uppercase tracking-tight text-foreground group-hover:text-primary transition-colors">{item.name || "UNSPECIFIED"}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell>
+                                {status != null && (
+                                    <Badge variant="outline" className={cn("text-[9px] font-bold h-5 px-1.5 uppercase", statusColor(status))}>
+                                        HTTP {status}
+                                    </Badge>
+                                )}
+                            </TableCell>
+                            <TableCell className="text-right pr-6">
+                                <div className="flex items-center justify-end gap-1.5 text-muted-foreground">
+                                    <Timer className="h-3 w-3" />
+                                    <span className="text-[11px] font-mono">{item.latency ? `${Math.round(item.latency * 1000)}ms` : "—"}</span>
+                                </div>
+                            </TableCell>
+                        </TableRow>
+                    )
+                })
             )}
-            {data.map((t) => {
-              const status = getStatus(t)
-              return (
-                <TableRow key={t.id}>
-                  <TableCell className="text-xs text-muted-foreground font-mono">
-                    {fmtTs(t.timestamp)}
-                  </TableCell>
-                  <TableCell className="font-medium text-sm">
-                    {t.userId || "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="text-[10px] uppercase font-bold">
-                      {getRole(t)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm font-mono">
-                    {t.name || "—"}
-                  </TableCell>
-                  <TableCell>
-                    {status != null && (
-                      <Badge variant={statusColor(status)} className="text-xs font-bold">
-                        {status}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right text-xs text-muted-foreground font-mono">
-                    {getLatencyMs(t)}
-                  </TableCell>
-                </TableRow>
-              )
-            })}
           </TableBody>
         </Table>
       </div>
 
-      {/* Pagination */}
       {meta.totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">
-            {t('audit.page', { page: meta.page, total: meta.totalPages })}
+        <div className="flex items-center justify-between bg-card/20 p-4 rounded-xl border border-border/50">
+          <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+            {t('audit.page', { page: meta.page, total: meta.totalPages })} ● ENTRIES { (meta.page - 1) * meta.limit + 1 } - { Math.min(meta.page * meta.limit, meta.totalItems) }
           </p>
           <div className="flex gap-2">
             <Button
               variant="outline"
               size="sm"
+              className="h-8 bg-black/20 border-border/50 hover:bg-white/10"
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
@@ -236,6 +179,7 @@ export function AuditView({ token }: AuditViewProps) {
             <Button
               variant="outline"
               size="sm"
+              className="h-8 bg-black/20 border-border/50 hover:bg-white/10"
               disabled={page >= meta.totalPages}
               onClick={() => setPage((p) => p + 1)}
             >

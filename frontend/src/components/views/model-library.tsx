@@ -1,218 +1,221 @@
-import { useCallback, useEffect, useState } from 'react'
-import { FolderInput, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { useCallback, useState } from 'react'
+import { FolderInput, Loader2, RefreshCw, Trash2, Box, Database, HardDrive, Info, ArrowUpRight, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { apiGet } from '@/lib/api'
 import { v2 } from '@/lib/api'
 import type { ModelView } from '@/lib/types'
 import { useI18n } from '@/lib/i18n'
+import { useModels } from '@/hooks/useModels'
+import { useCacheSummary } from '@/hooks/useCacheSummary'
+import { useAuthStore } from '@/store/useAuthStore'
+import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
-interface ModelLibraryViewProps {
-  token: string
-  onOpenService: (uid: string) => void
-}
-
-interface CacheSummary {
-  caches: Array<{
-    model_name: string
-    node_id: string
-    size_bytes: number
-    matched_model_uids?: string[]
-  }>
-}
-
-export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps) {
+export function ModelLibraryView() {
   const { t } = useI18n()
-  const [models, setModels] = useState<ModelView[]>([])
-  const [cacheSummary, setCacheSummary] = useState<CacheSummary | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { token } = useAuthStore()
+  const { data: models = [], isLoading: modelsLoading, refetch: refetchModels } = useModels()
+  const { data: cacheSummary, isLoading: cacheLoading, refetch: refetchCache } = useCacheSummary()
+  
+  const [searchQuery, setSearchQuery] = useState('')
   const [actingUid, setActingUid] = useState<string | null>(null)
-
   const [moveDialogOpen, setMoveDialogOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState<ModelView | null>(null)
   const [newPath, setNewPath] = useState('')
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [list, cache] = await Promise.all([
-        v2.listModels(token),
-        apiGet<CacheSummary>('/v2/cache/summary', token),
-      ])
-      setModels(list)
-      setCacheSummary(cache)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load model library')
-    } finally {
-      setLoading(false)
-    }
-  }, [token])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
-
-  useEffect(() => {
-    const id = setInterval(refresh, 10000)
-    return () => clearInterval(id)
-  }, [refresh])
+  const refresh = () => {
+    refetchModels()
+    refetchCache()
+  }
 
   const handleDelete = async (uid: string) => {
     setActingUid(uid)
-    setError(null)
-    try {
-      await v2.deleteModel(uid, token)
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete model')
-    } finally {
-      setActingUid(null)
-    }
+    const promise = v2.deleteModel(uid, token || '')
+    toast.promise(promise, {
+      loading: `Deleting model ${uid}...`,
+      success: () => {
+        refresh()
+        return 'Model deleted'
+      },
+      error: 'Delete failed'
+    })
+    try { await promise } finally { setActingUid(null) }
   }
 
-  const cacheMap = useCallback((modelUid: string, modelName: string) => {
-    const matched = (cacheSummary?.caches || []).filter((item) => {
-      if ((item.matched_model_uids || []).includes(modelUid)) {
-        return true
-      }
+  const getCacheStats = useCallback((modelUid: string, modelName: string) => {
+    const matched = (cacheSummary?.caches || []).filter((item: any) => {
+      if ((item.matched_model_uids || []).includes(modelUid)) return true
       return item.model_name === modelName
     })
     return {
-      nodes: new Set(matched.map((item) => item.node_id)).size,
-      bytes: matched.reduce((sum, item) => sum + item.size_bytes, 0),
+      nodes: new Set(matched.map((item: any) => item.node_id)).size,
+      bytes: matched.reduce((sum: number, item: any) => sum + item.size_bytes, 0),
     }
   }, [cacheSummary])
-
-  const openMoveDialog = (model: ModelView) => {
-    setSelectedModel(model)
-    setNewPath('')
-    setMoveDialogOpen(true)
-  }
 
   const handleMove = async () => {
     if (!selectedModel || !newPath.trim()) return
     setActingUid(selectedModel.model_uid)
-    setError(null)
-    try {
-      await v2.updateModel(selectedModel.model_uid, { model_path: newPath.trim() }, token)
-      setMoveDialogOpen(false)
-      setSelectedModel(null)
-      setNewPath('')
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update model path')
-    } finally {
-      setActingUid(null)
-    }
+    const promise = v2.updateModel(selectedModel.model_uid, { model_path: newPath.trim() }, token || '')
+    toast.promise(promise, {
+      loading: 'Updating storage path...',
+      success: () => {
+        setMoveDialogOpen(false)
+        refresh()
+        return 'Path updated'
+      },
+      error: 'Update failed'
+    })
+    try { await promise } finally { setActingUid(null) }
+  }
+
+  const filtered = models.filter(m => 
+    m.model_uid.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    m.model_name.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const formatSize = (bytes: number) => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">{t('library.title')}</h2>
-          <p className="text-sm text-muted-foreground mt-1">{t('library.subtitle')}</p>
+          <h2 className="text-3xl font-bold tracking-tight font-mono uppercase text-foreground">{t('library.title')}</h2>
+          <p className="text-muted-foreground mt-2 flex items-center gap-2">
+            <Database className="h-4 w-4 text-primary" />
+            {t('library.subtitle')}
+          </p>
         </div>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={loading} className="rounded-xl">
-          <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-          {t('common.refresh')}
-        </Button>
+        <div className="flex gap-3">
+          <div className="relative w-64 group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+            <input
+              type="text"
+              placeholder="SEARCH ASSETS..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-black/20 border border-border/50 rounded-lg pl-10 pr-4 py-2 text-xs font-mono focus:outline-none focus:border-primary/50 transition-all"
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refresh}
+            className="h-10 px-4 bg-white/5 border-border/50 font-mono text-[10px] uppercase tracking-widest"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 mr-2", modelsLoading || cacheLoading ? "animate-spin" : "")} />
+            {t('common.refresh')}
+          </Button>
+        </div>
       </div>
 
-      {error && (
-        <div className="bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-
-      <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-border bg-accent/30 flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-bold text-foreground tracking-tight">{t('library.assets')}</h3>
-          </div>
-          <Badge variant="outline" className="font-bold border-primary/20 text-primary uppercase h-6">
+      <div className="bg-card/40 backdrop-blur-xl border border-border rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between bg-white/5">
+          <h3 className="text-xs font-bold font-mono uppercase tracking-widest text-muted-foreground">{t('library.assets')}</h3>
+          <Badge variant="outline" className="font-mono text-[10px] border-primary/20 text-primary uppercase">
             {models.length} {t('library.models')}
           </Badge>
         </div>
 
         <Table>
-          <TableHeader>
-            <TableRow className="bg-muted hover:bg-muted border-b border-border">
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('models.model')}</TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('library.assetStatus')}</TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('library.serviceStatus')}</TableHead>
-              <TableHead className="text-[11px] font-bold text-muted-foreground uppercase py-4">{t('models.replicas')}</TableHead>
-              <TableHead className="text-right text-[11px] font-bold text-muted-foreground uppercase py-4">{t('common.actions')}</TableHead>
+          <TableHeader className="bg-black/20">
+            <TableRow className="border-border/50 hover:bg-transparent">
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground px-6 py-4">Asset Identity</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Storage Status</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Service Level</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold text-muted-foreground">Provisioning</TableHead>
+              <TableHead className="text-right text-[10px] uppercase font-bold text-muted-foreground pr-6">Management</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {(modelsLoading || cacheLoading) && models.length === 0 ? (
+                <TableRow>
+                    <TableCell colSpan={5} className="h-64 text-center">
+                        <div className="flex flex-col items-center gap-3 opacity-50">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            <p className="text-[10px] font-mono uppercase tracking-widest">{t('library.loading')}</p>
+                        </div>
+                    </TableCell>
+                </TableRow>
+            ) : filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="h-40 text-center">
-                  <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">{t('library.loading')}</p>
-                </TableCell>
-              </TableRow>
-            ) : models.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="h-40 text-center text-sm text-muted-foreground">
-                  {t('library.empty')}
+                <TableCell colSpan={5} className="h-64 text-center">
+                  <div className="flex flex-col items-center justify-center opacity-30 gap-3">
+                    <Database className="h-12 w-12" />
+                    <p className="text-[10px] font-mono uppercase tracking-widest">{t('library.empty')}</p>
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (
-              models.map((model) => {
-                const acting = actingUid === model.model_uid
-                const cache = cacheMap(model.model_uid, model.model_name)
+              filtered.map((model) => {
+                const stats = getCacheStats(model.model_uid, model.model_name)
+                const isActing = actingUid === model.model_uid
                 return (
-                  <TableRow key={model.model_uid}>
-                    <TableCell className="py-4">
-                      <div className="font-bold text-sm tracking-tight">{model.model_uid}</div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[300px] truncate">{model.model_name}</div>
-                    </TableCell>
-                    <TableCell>
-                      {cache.bytes > 0 ? (
-                        <Badge variant="secondary" className="text-[11px] font-bold uppercase">{t('catalog.downloaded')}</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-[11px] font-bold uppercase">{t('library.pending')}</Badge>
-                      )}
-                      <div className="text-[10px] text-muted-foreground mt-1">
-                        {t('library.cachedNodes', { count: cache.nodes })}
+                  <TableRow key={model.model_uid} className="border-border/40 hover:bg-white/5 transition-colors group">
+                    <TableCell className="px-6 py-5">
+                      <div className="flex flex-col gap-1.5">
+                        <span className="font-mono text-sm font-bold group-hover:text-primary transition-colors">{model.model_uid}</span>
+                        <span className="text-[10px] text-muted-foreground/60 font-mono truncate max-w-[280px] uppercase tracking-tighter">{model.model_name}</span>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="text-[11px] font-bold uppercase">{model.state}</Badge>
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center gap-2">
+                            <div className={cn("w-1.5 h-1.5 rounded-full", stats.bytes > 0 ? "bg-success" : "bg-warning")} />
+                            <span className={cn("text-[10px] font-bold uppercase tracking-wider", stats.bytes > 0 ? "text-success" : "text-warning")}>
+                                {stats.bytes > 0 ? t('catalog.downloaded') : t('library.pending')}
+                            </span>
+                        </div>
+                        <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">
+                            {formatSize(stats.bytes)} ● {stats.nodes} NODES
+                        </span>
+                      </div>
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm font-bold">{model.replicas.ready}/{model.replicas.desired}</span>
+                        <Badge variant="outline" className="font-mono text-[9px] border-border/50 text-muted-foreground uppercase">
+                            {model.state}
+                        </Badge>
                     </TableCell>
-                    <TableCell className="text-right">
-                      <div className="inline-flex items-center gap-2">
-                        <Button size="sm" variant="outline" className="rounded-xl h-8" onClick={() => onOpenService(model.model_uid)}>
-                          {t('library.openService')}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="rounded-xl h-8"
-                          onClick={() => openMoveDialog(model)}
-                          disabled={acting}
+                    <TableCell>
+                      <div className="flex items-baseline gap-1 font-mono">
+                        <span className="text-sm font-bold text-foreground">{model.replicas.ready}</span>
+                        <span className="text-[10px] text-muted-foreground">/ {model.replicas.desired}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right pr-6">
+                      <div className="flex justify-end gap-2">
+                        <Button 
+                            variant="ghost" size="sm" 
+                            className="h-9 px-4 hover:bg-white/10 font-bold text-[10px] uppercase tracking-widest border border-transparent hover:border-border/50 transition-all"
                         >
-                          <FolderInput className="h-3.5 w-3.5 mr-1" /> {t('library.move')}
+                          OPEN SERVICE
+                          <ArrowUpRight className="ml-2 h-3.5 w-3.5" />
                         </Button>
                         <Button
-                          size="sm"
-                          variant="destructive"
-                          className="rounded-xl h-8"
+                          variant="ghost" size="sm"
+                          className="h-9 w-9 p-0 hover:bg-white/10"
+                          onClick={() => { setSelectedModel(model); setNewPath(''); setMoveDialogOpen(true); }}
+                          disabled={isActing}
+                        >
+                          <FolderInput className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost" size="sm"
+                          className="h-9 w-9 p-0 hover:bg-destructive/20 hover:text-destructive"
                           onClick={() => handleDelete(model.model_uid)}
-                          disabled={acting}
+                          disabled={isActing}
                         >
-                          <Trash2 className="h-3.5 w-3.5 mr-1" /> {t('common.delete')}
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </TableCell>
@@ -225,28 +228,52 @@ export function ModelLibraryView({ token, onOpenService }: ModelLibraryViewProps
       </div>
 
       <Dialog open={moveDialogOpen} onOpenChange={setMoveDialogOpen}>
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="sm:max-w-[500px] bg-card/95 backdrop-blur-2xl border-border rim-light">
           <DialogHeader>
-            <DialogTitle>{t('library.moveStoragePath')}</DialogTitle>
+            <DialogTitle className="font-mono uppercase tracking-tight text-2xl flex items-center gap-3">
+              <HardDrive className="h-6 w-6 text-primary" />
+              Relocate Asset
+            </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-3 py-2">
-            <p className="text-sm text-muted-foreground break-all">{t('models.model')}: {selectedModel?.model_uid || '—'}</p>
+          <div className="space-y-6 py-4">
+            <div className="space-y-1 p-3 rounded-lg bg-white/5 border border-border/30">
+              <p className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Target Asset</p>
+              <p className="text-sm font-mono font-bold text-foreground break-all">{selectedModel?.model_uid || '—'}</p>
+            </div>
+
             <div className="space-y-2">
-              <Label htmlFor="library-move-path">{t('library.newPath')}</Label>
-              <Input
-                id="library-move-path"
-                placeholder={t('library.newPathPlaceholder')}
-                value={newPath}
-                onChange={(e) => setNewPath(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">{t('library.movePathHint')}</p>
+              <Label htmlFor="library-move-path" className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">New Storage Path</Label>
+              <div className="relative">
+                  <Box className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="library-move-path"
+                    className="pl-10 bg-white/5 border-border/50 font-mono text-xs"
+                    placeholder="/mnt/fast-storage/..."
+                    value={newPath}
+                    onChange={(e) => setNewPath(e.target.value)}
+                  />
+              </div>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-widest mt-1">
+                 Ensure the target path is accessible from all compute nodes
+              </p>
+            </div>
+            
+            <div className="p-4 rounded-lg bg-primary/5 border border-primary/10 flex gap-3">
+                <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                <p className="text-[10px] text-muted-foreground uppercase leading-relaxed tracking-wider">
+                    Relocating an asset updates its internal metadata pointer. Actual data migration must be handled at the storage layer if paths are not shared.
+                </p>
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setMoveDialogOpen(false)}>{t('common.cancel')}</Button>
-            <Button onClick={handleMove} disabled={!newPath.trim() || !selectedModel}>{t('common.save')}</Button>
+          <DialogFooter className="bg-black/20 -mx-6 -mb-6 p-6 mt-4">
+            <Button variant="ghost" onClick={() => setMoveDialogOpen(false)} className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground">
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={handleMove} disabled={!newPath.trim() || !selectedModel} className="bg-primary text-primary-foreground rim-light h-10 px-8 font-bold uppercase tracking-widest text-xs ml-auto">
+              COMMIT RELOCATION
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
